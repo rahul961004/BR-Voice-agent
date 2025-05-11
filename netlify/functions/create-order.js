@@ -265,7 +265,16 @@ exports.handler = async (event, context) => {
         throw new Error('Square access token not configured');
       }
       
-      const response = await axios.post(`${SQUARE_API_URL}/v2/orders`, orderPayload, {
+      // Log the URL and token being used (masking most of the token for security)
+      const maskedToken = SQUARE_ACCESS_TOKEN ? 
+        `${SQUARE_ACCESS_TOKEN.substring(0, 4)}...${SQUARE_ACCESS_TOKEN.substring(SQUARE_ACCESS_TOKEN.length - 4)}` : 
+        'NOT CONFIGURED';
+      console.log(`Using Square API URL: ${SQUARE_API_URL}`);
+      console.log(`Using Square Access Token: ${maskedToken}`);
+      console.log(`Using Location ID: ${LOCATION_ID || 'NOT CONFIGURED'}`);
+      
+      // Make the API call to Square
+      const response = await axios.post(`${SQUARE_API_URL}/api/v2/orders`, orderPayload, {
         headers: {
           'Square-Version': '2023-09-25',
           'Authorization': `Bearer ${SQUARE_ACCESS_TOKEN}`,
@@ -281,33 +290,45 @@ exports.handler = async (event, context) => {
         body: JSON.stringify(response.data)
       };
     } catch (squareError) {
-      console.error('Error creating order in Square:', squareError.response?.data || squareError.message);
+      // Detailed error logging to diagnose the issue
+      console.error('Error creating order in Square:');
       
-      // For demo purposes, return a success response with mock data
-      const demoOrderResponse = {
-        order: {
-          id: `demo-order-${Date.now()}`,
-          location_id: LOCATION_ID || 'DEMO_LOCATION',
-          line_items: lineItems.map(item => ({
-            ...item,
-            id: `item-${Math.floor(Math.random() * 1000)}`,
-            name: item.name
-          })),
-          total_money: {
-            amount: lineItems.reduce((total, item) => total + 1000 * parseInt(item.quantity), 0),
-            currency: 'USD'
-          },
-          state: 'OPEN',
-          created_at: new Date().toISOString()
+      if (squareError.response) {
+        // The request was made and the server responded with a status code outside of 2xx range
+        console.error('Square API Error Response:');
+        console.error('Status:', squareError.response.status);
+        console.error('Headers:', JSON.stringify(squareError.response.headers, null, 2));
+        console.error('Data:', JSON.stringify(squareError.response.data, null, 2));
+      } else if (squareError.request) {
+        // The request was made but no response was received
+        console.error('No response received from Square API');
+        console.error('Request details:', squareError.request);
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        console.error('Error setting up request:', squareError.message);
+      }
+      
+      // Add config info for debugging
+      if (squareError.config) {
+        console.error('Request URL:', squareError.config.url);
+        console.error('Request Method:', squareError.config.method);
+        // Mask auth header if present
+        const configHeaders = {...squareError.config.headers};
+        if (configHeaders.Authorization) {
+          configHeaders.Authorization = '****MASKED****';
         }
-      };
+        console.error('Request Headers:', JSON.stringify(configHeaders, null, 2));
+      }
       
-      console.log('Returning demo order response for testing:', demoOrderResponse);
-      
+      // Return error response to client for better debugging
       return {
-        statusCode: 200,
+        statusCode: 500,
         headers,
-        body: JSON.stringify(demoOrderResponse)
+        body: JSON.stringify({
+          error: 'Failed to create order in Square',
+          details: squareError.response?.data || squareError.message,
+          timestamp: new Date().toISOString()
+        })
       };
     }
   } catch (error) {
