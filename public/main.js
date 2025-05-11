@@ -17,13 +17,15 @@ document.addEventListener('DOMContentLoaded', async function() {
   console.log('Using API base URL:', baseApiUrl);
 
   // Initialize UI elements
-  const testOrderBtn = document.getElementById('test-order-btn');
+  const submitOrderBtn = document.getElementById('submit-order-btn');
   const orderInfo = document.getElementById('order-info');
+  const orderSummary = document.getElementById('order-summary');
+  const orderItemList = document.getElementById('order-item-list');
   const widgetPlaceholder = document.getElementById('widget-placeholder');
 
   // Add event listeners
-  if (testOrderBtn) {
-    testOrderBtn.addEventListener('click', createTestOrder);
+  if (submitOrderBtn) {
+    submitOrderBtn.addEventListener('click', handleSubmitOrder);
   }
 
   // Load the ElevenLabs Widget
@@ -81,6 +83,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             // Analyze transcript for order items
             extractOrderItems(userMessage);
+            
+            // Update the UI with the latest order information
+            updateOrderDisplay();
             break;
             
           case 'elevenlabs-widget:response':
@@ -91,7 +96,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             // Look for order confirmation in the AI's response
             if (isOrderConfirmation(aiMessage)) {
-              handleOrderConfirmation();
+              // Enable the submit button when order is confirmed
+              if (submitOrderBtn && orderItems.length > 0) {
+                submitOrderBtn.disabled = false;
+              }
+              
+              updateOrderDisplay();
             }
             break;
             
@@ -108,6 +118,58 @@ document.addEventListener('DOMContentLoaded', async function() {
     } catch (error) {
       console.error('Error processing widget message:', error);
     }
+  }
+  
+  // Update the order display with current items
+  function updateOrderDisplay() {
+    if (!orderSummary || !orderItemList) return;
+    
+    // Clear previous content
+    orderSummary.innerHTML = '';
+    orderItemList.innerHTML = '';
+    
+    if (orderItems.length === 0) {
+      // No items yet
+      orderSummary.innerHTML = '<p class="no-order">No order detected yet. Please speak to the assistant to place an order.</p>';
+      submitOrderBtn.disabled = true;
+      return;
+    }
+    
+    // Customer name
+    const nameDisplay = document.createElement('p');
+    nameDisplay.innerHTML = `<strong>Customer:</strong> ${customerName || 'Unknown Customer'}`;
+    orderSummary.appendChild(nameDisplay);
+    
+    // Total items
+    const totalItemsDisplay = document.createElement('p');
+    const totalItems = orderItems.reduce((total, item) => total + item.quantity, 0);
+    totalItemsDisplay.innerHTML = `<strong>Total Items:</strong> ${totalItems}`;
+    orderSummary.appendChild(totalItemsDisplay);
+    
+    // Display each item
+    orderItems.forEach(item => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'order-item';
+      
+      const itemDetails = document.createElement('div');
+      itemDetails.className = 'item-details';
+      
+      // Item name and quantity
+      const itemNameEl = document.createElement('div');
+      itemNameEl.innerHTML = `<span class="item-quantity">${item.quantity}x</span>${item.name}`;
+      itemDetails.appendChild(itemNameEl);
+      
+      // Item modifiers if any
+      if (item.modifiers && item.modifiers.length > 0) {
+        const modifiersEl = document.createElement('div');
+        modifiersEl.className = 'item-modifiers';
+        modifiersEl.textContent = item.modifiers.join(', ');
+        itemDetails.appendChild(modifiersEl);
+      }
+      
+      itemEl.appendChild(itemDetails);
+      orderItemList.appendChild(itemEl);
+    });
   }
 
   // Extract customer name from conversation
@@ -200,14 +262,33 @@ document.addEventListener('DOMContentLoaded', async function() {
     return confirmationPhrases.some(phrase => phrase.test(text));
   }
 
-  // Handle order confirmation - Submit the order to Square
-  async function handleOrderConfirmation() {
+  // Handle submit order button click - Send extracted data to Square
+  async function handleSubmitOrder() {
     if (orderItems.length === 0) {
       console.log('No items to order');
+      
+      if (orderInfo) {
+        orderInfo.textContent = 'No items to order. Please speak to the assistant first.';
+        orderInfo.style.display = 'block';
+        orderInfo.style.backgroundColor = '#ffebee';
+      }
+      
       return;
     }
     
-    console.log(`Confirming order for ${customerName || 'Customer'}:`, orderItems);
+    console.log(`Submitting order for ${customerName || 'Customer'}:`, orderItems);
+    
+    // Show processing state
+    if (submitOrderBtn) {
+      submitOrderBtn.disabled = true;
+      submitOrderBtn.textContent = 'Processing...';
+    }
+    
+    if (orderInfo) {
+      orderInfo.textContent = 'Processing order...';
+      orderInfo.style.display = 'block';
+      orderInfo.style.backgroundColor = '#e3f2fd';
+    }
     
     // Format items for submission
     const formattedItems = orderItems.map(item => ({
@@ -217,18 +298,36 @@ document.addEventListener('DOMContentLoaded', async function() {
     }));
     
     // Submit the order
-    const orderResponse = await submitOrder(formattedItems);
-    
-    if (orderResponse) {
-      // Display order confirmation
-      if (orderInfo) {
-        orderInfo.textContent = `Order submitted! ${orderResponse.order ? `Order ID: ${orderResponse.order.id}` : ''}`;
-        orderInfo.style.display = 'block';
-        orderInfo.style.backgroundColor = '#e8f5e9';
-      }
+    try {
+      const orderResponse = await submitOrder(formattedItems);
       
-      // Reset the order after successful submission
-      orderItems = [];
+      if (orderResponse) {
+        // Display order confirmation
+        if (orderInfo) {
+          const orderId = orderResponse.order?.id || orderResponse.id || '';
+          orderInfo.textContent = `Order submitted successfully! ${orderId ? `Order ID: ${orderId}` : ''}`;
+          orderInfo.style.display = 'block';
+          orderInfo.style.backgroundColor = '#e8f5e9';
+        }
+        
+        // Reset the order after successful submission
+        orderItems = [];
+        updateOrderDisplay();
+      }
+    } catch (error) {
+      console.error('Error submitting order:', error);
+      
+      if (orderInfo) {
+        orderInfo.textContent = `Error submitting order: ${error.message}`;
+        orderInfo.style.display = 'block';
+        orderInfo.style.backgroundColor = '#ffebee';
+      }
+    } finally {
+      // Reset button state
+      if (submitOrderBtn) {
+        submitOrderBtn.textContent = 'Submit Order to Square';
+        submitOrderBtn.disabled = orderItems.length === 0;
+      }
     }
   }
 

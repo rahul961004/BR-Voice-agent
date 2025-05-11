@@ -31,12 +31,48 @@
       padding: 2rem;
       margin-bottom: 2rem;
     }
-    .test-controls {
+    .order-details {
       background-color: #f9f9f9;
       border-radius: 8px;
       padding: 1.5rem;
       margin-top: 2rem;
       border: 1px solid #ddd;
+    }
+    #order-summary {
+      background-color: #fff;
+      padding: 1rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      border: 1px solid #eee;
+    }
+    #order-item-list {
+      margin: 1rem 0;
+    }
+    .order-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem;
+      border-bottom: 1px solid #eee;
+      background-color: #fff;
+      margin-bottom: 0.5rem;
+      border-radius: 4px;
+    }
+    .item-details {
+      flex: 1;
+    }
+    .item-quantity {
+      font-weight: bold;
+      margin-right: 1rem;
+    }
+    .item-modifiers {
+      font-style: italic;
+      color: #666;
+      font-size: 0.9rem;
+      margin-top: 0.25rem;
+    }
+    .no-order {
+      color: #888;
+      font-style: italic;
     }
     button {
       background-color: #9c3838;
@@ -88,10 +124,14 @@
       </div>
     </div>
 
-    <div class="test-controls">
-      <h2>Test Controls</h2>
-      <p>Use the button below to create a test order directly:</p>
-      <button id="test-order-btn">Create Test Order</button>
+    <div class="order-details">
+      <h2>Order Details</h2>
+      <p>Voice-detected order information will appear here:</p>
+      <div id="order-summary">
+        <p class="no-order">No order detected yet. Please speak to the assistant to place an order.</p>
+      </div>
+      <div id="order-item-list"></div>
+      <button id="submit-order-btn" disabled>Submit Order to Square</button>
       <div id="order-info"></div>
     </div>
   </div>
