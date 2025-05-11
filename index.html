@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Burger Rebellion Voice Ordering</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #f8f8f8;
+      font-family: Arial, sans-serif;
+    }
+    
+    elevenlabs-convai {
+      transform: scale(1.3);
+      display: block;
+    }
+
+    .burger-logo {
+      position: absolute;
+      top: 20px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      z-index: 1;
+    }
+
+    .burger-logo h1 {
+      color: #d32f2f;
+      font-size: 36px;
+      margin: 0;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+    }
+
+    .burger-logo p {
+      color: #444;
+      margin: 5px 0 0;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="burger-logo">
+    <h1>Burger Rebellion</h1>
+    <p>Order using your voice!</p>
+  </div>
+  
+  <elevenlabs-convai agent-id="U95ETaD2JpoAJTDuMHQT"></elevenlabs-convai>
+  <script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
+  <script src="main.js"></script>
+
+  <script>
+    // This function monitors the console and provides helpful error information
+    (function() {
+      const originalConsoleError = console.error;
+      console.error = function(...args) {
+        originalConsoleError.apply(console, args);
+        
+        // Check if this is a permission error with the widget
+        const errorString = args.join(' ');
+        if (errorString.includes('permission') || errorString.includes('denied')) {
+          console.log('%cWidget Info: The ElevenLabs widget requires permission to access your microphone. Please allow microphone access when prompted.', 'color: blue; font-weight: bold');
+        }
+      };
+    })();
+  </script>
+</body>
+</html>

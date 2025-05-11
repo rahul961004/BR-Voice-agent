@@ -1,0 +1,22 @@
+{
+  "name": "burger-rebellion-voice-ordering",
+  "version": "1.0.0",
+  "description": "Voice ordering application using ElevenLabs Widget and Square API with Netlify serverless functions",
+  "main": "netlify/functions/create-order.js",
+  "scripts": {
+    "start": "netlify dev",
+    "build": "# No build step needed",
+    "dev": "netlify dev"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "https": "^1.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}

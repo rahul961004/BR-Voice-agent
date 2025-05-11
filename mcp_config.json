@@ -1,0 +1,38 @@
+{
+  "servers": {
+    "elevenlabs": {
+      "url": "http://localhost:5001",
+      "env": {
+        "ELEVENLABS_API_KEY": "EAAAl5SM50YDIQl1SsC4xJbgqI3t114MBEn02nhI-kzNpBJ7qmHZYCKI0JE_gFNt"
+      }
+    },
+    "square": {
+      "url": "https://connect.squareupsandbox.com",
+      "env": {
+        "SQUARE_ACCESS_TOKEN": "EAAAl5SM50YDIQl1SsC4xJbgqI3t114MBEn02nhI-kzNpBJ7qmHZYCKI0JE_gFNt",
+        "LOCATION_ID": "L165PVGQ2WPNG"
+      }
+    },
+    "mcp": {
+      "url": "http://localhost:5000",
+      "env": {}
+    }
+  },
+  "tools": {
+    "end_call": {
+      "server": "elevenlabs",
+      "path": "/api/end_call",
+      "method": "POST"
+    },
+    "create_order": {
+      "server": "mcp",
+      "path": "/api/create_order",
+      "method": "POST"
+    },
+    "calculate_order": {
+      "server": "square",
+      "path": "/v2/orders/calculate",
+      "method": "POST"
+    }
+  }
+}
