@@ -6,13 +6,15 @@ document.addEventListener('DOMContentLoaded', async function() {
   let conversationHistory = [];
   let baseApiUrl = '';
 
-  // Determine API base URL - use relative URL in production, absolute in development
+  // Determine API base URL based on environment
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     baseApiUrl = 'http://localhost:8888';
   } else {
     // In production, use relative path which will be handled by Netlify redirects
     baseApiUrl = '';
   }
+  
+  console.log('Using API base URL:', baseApiUrl);
 
   // Initialize UI elements
   const testOrderBtn = document.getElementById('test-order-btn');
@@ -291,7 +293,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Directly submit to serverless function
     try {
       console.log('Creating test order...');
-      const response = await fetch(`${baseApiUrl}/api/create-order`, {
+      // Use the Netlify function path format
+      const response = await fetch(`${baseApiUrl}/.netlify/functions/create-order`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

@@ -82,7 +82,26 @@
         <li>"Add extra cheese to my burger please"</li>
       </ul>
       <div id="widget-placeholder">
-        <!-- ElevenLabs Widget will be loaded here -->
+        <!-- ElevenLabs Widget direct embed -->
+        <script src="https://widget.elevenlabs.io/widget.js"></script>
+        <script>
+          window.addEventListener('load', function() {
+            if (typeof ElevenLabsWidget !== 'undefined') {
+              console.log('Initializing ElevenLabs widget directly');
+              ElevenLabsWidget.init({
+                voice: "Rachel",
+                embedded: true,
+                element: document.getElementById('widget-placeholder')
+              });
+            } else {
+              console.error('ElevenLabs widget script failed to load');
+              document.getElementById('widget-placeholder').innerHTML = 
+                '<div style="padding: 20px; background-color: #ffebee; border-radius: 4px; text-align: center;">' +
+                '<p>Widget failed to load. Please check your browser console for errors.</p>' +
+                '</div>';
+            }
+          });
+        </script>
       </div>
     </div>
 
