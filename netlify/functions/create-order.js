@@ -1,54 +1,122 @@
-// Serverless function for creating orders in Square using official SDK
-const { SquareClient, SquareEnvironment, SquareError } = require('square');
-const fs = require('fs');
+/**
+ * Simple serverless function for ElevenLabs webhook to Square integration
+ * This is a minimal implementation that prioritizes reliability
+ */
+const { SquareClient, SquareEnvironment } = require('square');
 require('dotenv').config();
 
-// Initialize Square client (will use either local config or environment variables)
-let LOCATION_ID;
-let squareClient;
-
-// Set up the Square client with proper configuration
-try {
-  // First try environment variables (Netlify production environment)
-  if (process.env.SQUARE_ACCESS_TOKEN) {
-    console.log('Using Square credentials from environment variables');
-    LOCATION_ID = process.env.LOCATION_ID;
+exports.handler = async (event, context) => {
+  // Set CORS headers for all responses
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+  };
+  
+  // Handle preflight OPTIONS request
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 204,
+      headers
+    };
+  }
+  
+  // Log all request details for debugging
+  console.log('Request method:', event.httpMethod);
+  console.log('Request headers:', JSON.stringify(event.headers, null, 2));
+  console.log('Raw request body:', event.body);
+  
+  try {
+    // Check if environment variables are set correctly
+    const SQUARE_ACCESS_TOKEN = process.env.SQUARE_ACCESS_TOKEN;
+    const LOCATION_ID = process.env.LOCATION_ID;
     
-    squareClient = new SquareClient({
-      accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: SquareEnvironment.Sandbox, // Always use sandbox for testing
-      userAgentDetail: 'Burger-Rebellion-Voice-Ordering' // Custom agent for tracking API calls
-    });
-  } 
-  // Try loading from mcp_config.json if we're running locally
-  else {
+    console.log(`SQUARE_ACCESS_TOKEN present: ${SQUARE_ACCESS_TOKEN ? 'Yes (redacted)' : 'No'}`);
+    console.log(`LOCATION_ID present: ${LOCATION_ID ? LOCATION_ID : 'No'}`);
+    
+    // Parse the incoming webhook data
+    let webhookData;
     try {
-      const mcpConfig = JSON.parse(fs.readFileSync('./mcp_config.json', 'utf8'));
-      LOCATION_ID = mcpConfig.servers.square.env.LOCATION_ID;
-      
-      squareClient = new SquareClient({
-        accessToken: mcpConfig.servers.square.env.SQUARE_ACCESS_TOKEN,
-        environment: SquareEnvironment.Sandbox,
-        userAgentDetail: 'Burger-Rebellion-Voice-Ordering'
-      });
-      
-      console.log('Using Square credentials from mcp_config.json');
-    } catch (configError) {
-      throw new Error('Failed to load Square credentials from config file or environment variables');
+      webhookData = JSON.parse(event.body);
+      console.log('Parsed webhook data:', JSON.stringify(webhookData, null, 2));
+    } catch (parseError) {
+      console.error('Error parsing webhook data:', parseError.message);
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ success: false, error: 'Invalid JSON in request body' })
+      };
     }
+    
+    // Extract customer name and items from the webhook data
+    const customerName = webhookData.customer_name || 'Unknown Customer';
+    const orderItems = Array.isArray(webhookData.items) ? webhookData.items : [];
+    
+    console.log(`Extracted customer name: ${customerName}`);
+    console.log(`Extracted ${orderItems.length} order items:`, JSON.stringify(orderItems, null, 2));
+    
+    // Initialize Square client
+    const squareClient = new SquareClient({
+      accessToken: SQUARE_ACCESS_TOKEN,
+      environment: SquareEnvironment.Sandbox
+    });
+    
+    // Prepare line items for Square
+    const lineItems = orderItems.map(item => ({
+      name: item.name || 'Unknown Item',
+      quantity: String(item.quantity || 1),
+      basePriceMoney: {
+        amount: 1000, // Default price $10.00
+        currency: 'USD'
+      },
+      note: item.modifiers && item.modifiers.length > 0 ? 
+        `Modifiers: ${item.modifiers.join(', ')}` : undefined
+    }));
+    
+    // Create order payload
+    const orderPayload = {
+      order: {
+        locationId: LOCATION_ID,
+        lineItems: lineItems,
+        state: 'OPEN',
+        customerNote: `Voice order for ${customerName}`
+      },
+      idempotencyKey: `voice-order-${Date.now()}`
+    };
+    
+    console.log('Sending order to Square:', JSON.stringify(orderPayload, null, 2));
+    
+    // Create order in Square
+    const { result } = await squareClient.ordersApi.createOrder(orderPayload);
+    console.log('Order created successfully:', JSON.stringify(result, null, 2));
+    
+    // Return success response
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ 
+        success: true, 
+        message: 'Order created successfully', 
+        order_id: result.order.id 
+      })
+    };
+  } catch (error) {
+    // Log the full error for debugging
+    console.error('Error processing order:', error);
+    
+    // Return a helpful error response
+    return {
+      statusCode: 200, // Return 200 even on error to prevent webhook retries
+      headers,
+      body: JSON.stringify({ 
+        success: false, 
+        message: 'Error processing order', 
+        error: error.message,
+        webhook_received: true
+      })
+    };
   }
-  
-  // Verify client is initialized
-  if (!squareClient) {
-    throw new Error('Failed to initialize Square client');
-  }
-  
-  console.log('Square client initialized successfully');
-} catch (error) {
-  console.error('Error initializing Square client:', error.message);
-}
-
-// Helper function to find an item in the catalog
+};
 function findCatalogItem(catalogCache, itemName) {
   if (!itemName) return null;
   
@@ -353,18 +421,53 @@ exports.handler = async (event, context) => {
       
       // Make the API call to Square using SDK
       try {
+        // Check if the line items array is valid and not empty
+        if (!lineItems || lineItems.length === 0) {
+          throw new Error('Cannot create order: No valid line items to send to Square');
+        }
+        
+        // Make sure we have a valid location ID
+        if (!LOCATION_ID) {
+          throw new Error('Cannot create order: Missing Square location ID');
+        }
+
+        // Verify that our Square client is properly initialized
+        if (!squareClient || !squareClient.ordersApi) {
+          throw new Error('Cannot create order: Square SDK client not properly initialized');
+        }
+        
+        // Make the API call with proper error handling
         const { result } = await squareClient.ordersApi.createOrder(orderPayload);
+        
         console.log('Square SDK response:', JSON.stringify(result, null, 2));
         console.log('Order created successfully:', JSON.stringify(result, null, 2));
         
+        // Return successful response
         return {
           statusCode: 200,
           headers,
-          body: JSON.stringify(result)
+          body: JSON.stringify({
+            success: true,
+            message: 'Order created successfully',
+            order_id: result.order?.id,
+            order: result
+          })
         };
       } catch (squareSdkError) {
         console.error('Error from Square SDK:', squareSdkError);
-        throw squareSdkError; // Re-throw to be caught by the outer catch
+        
+        // Return a more meaningful error that includes the specific SDK error details
+        return {
+          statusCode: 422, // Unprocessable Entity - better than 500 for client debugging
+          headers,
+          body: JSON.stringify({
+            success: false,
+            message: 'Failed to create order in Square',
+            error: squareSdkError.message,
+            details: squareSdkError.errors || [],
+            data_sent: orderPayload
+          })
+        };
       }
     } catch (squareError) {
       // Detailed error logging to diagnose the issue
@@ -386,23 +489,14 @@ exports.handler = async (event, context) => {
           statusCode: 400,
           headers,
           body: JSON.stringify({
-            error: 'Failed to create order in Square',
-            details: squareError.errors,
-            timestamp: new Date().toISOString()
-          })
-        };
-      } else {
-        // This is a general error (not a Square API error)
-        console.error('General error:', squareError.message);
-        
-        // Return error response to client
-        return {
-          statusCode: 500,
-          headers,
-          body: JSON.stringify({
-            error: 'Failed to create order in Square',
-            details: squareError.message,
-            timestamp: new Date().toISOString()
+            success: false,
+            message: 'Failed to create order in Square',
+            error: squareError.message,
+            received_data: requestBody,
+            extracted_data: {
+              customer_name: customerName,
+              line_items: orderItems
+            }
           })
         };
       }
