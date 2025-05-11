@@ -200,16 +200,55 @@ exports.handler = async (event, context) => {
   
   try {
     // Parse request body
+    console.log('Raw request body:', event.body);
     const requestBody = JSON.parse(event.body);
-    const { customer_name, items } = requestBody;
+    console.log('Parsed request body:', JSON.stringify(requestBody, null, 2));
     
-    console.log('Received order request:', JSON.stringify(requestBody, null, 2));
+    // Extract data - be flexible with format that might come from ElevenLabs
+    let customerName = '';
+    let orderItems = [];
     
-    if (!items || !Array.isArray(items) || items.length === 0) {
+    // Check for typical properties we might receive
+    if (requestBody.customer_name) {
+      customerName = requestBody.customer_name;
+    } else if (requestBody.customerName) {
+      customerName = requestBody.customerName;
+    } else if (requestBody.name) {
+      customerName = requestBody.name;
+    }
+    
+    // Check for items array in different possible formats
+    if (Array.isArray(requestBody.items)) {
+      orderItems = requestBody.items;
+    } else if (Array.isArray(requestBody.orderItems)) {
+      orderItems = requestBody.orderItems;
+    } else if (requestBody.order && Array.isArray(requestBody.order.items)) {
+      orderItems = requestBody.order.items;
+    } else if (typeof requestBody === 'object') {
+      // Try to extract items from the structure if they're not in an expected format
+      for (const key in requestBody) {
+        if (Array.isArray(requestBody[key])) {
+          const possibleItems = requestBody[key];
+          if (possibleItems.length > 0 && 
+              (possibleItems[0].name || possibleItems[0].item || possibleItems[0].product)) {
+            orderItems = possibleItems;
+            break;
+          }
+        }
+      }
+    }
+    
+    console.log('Extracted customer name:', customerName);
+    console.log('Extracted order items:', JSON.stringify(orderItems, null, 2));
+    
+    if (!orderItems || !Array.isArray(orderItems) || orderItems.length === 0) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: 'No items provided in the order' })
+        body: JSON.stringify({ 
+          error: 'No items provided in the order',
+          receivedData: requestBody 
+        })
       };
     }
     
@@ -219,15 +258,25 @@ exports.handler = async (event, context) => {
     // Match items to catalog
     const lineItems = [];
     
-    for (const item of items) {
+    for (const item of orderItems) {
+      // Extract item name - be flexible with the property name
+      const itemName = item.name || item.item || item.product || item.description || '';
+      
+      // Log what we're processing
+      console.log(`Processing item: ${JSON.stringify(item)}`);
+      console.log(`Extracted item name: ${itemName}`);
+      
       // Find matching item in catalog
-      const catalogItem = findCatalogItem(catalogCache, item.name);
+      const catalogItem = findCatalogItem(catalogCache, itemName);
       
       if (catalogItem) {
-        // Create Square line item
+        // Create Square line item - be flexible with the quantity property
+        const quantity = item.quantity || item.count || item.amount || 1;
+        console.log(`Item quantity: ${quantity}`);
+        
         const lineItem = {
-          quantity: String(item.quantity || 1),
-          note: customer_name ? `For: ${customer_name}` : undefined
+          quantity: String(quantity),
+          note: customerName ? `For: ${customerName}` : undefined
         };
         
         // Add catalog object ID if we found a match
@@ -241,26 +290,35 @@ exports.handler = async (event, context) => {
           };
         }
         
-        // Add modifiers if present
-        if (item.modifiers && item.modifiers.length > 0) {
-          const validModifiers = item.modifiers.filter(mod => mod && mod !== '');
+        // Add modifiers if present - be flexible with different property names
+        const modifiers = item.modifiers || item.modifications || item.options || [];
+        if (Array.isArray(modifiers) && modifiers.length > 0) {
+          const validModifiers = modifiers.filter(mod => mod && mod !== '');
           if (validModifiers.length > 0) {
             lineItem.note = (lineItem.note || '') + ` - Mods: ${validModifiers.join(', ')}`;
           }
+        } else if (typeof item.modifiers === 'string' && item.modifiers.trim() !== '') {
+          // Handle case where modifiers might be a single string
+          lineItem.note = (lineItem.note || '') + ` - Mods: ${item.modifiers.trim()}`;
         }
         
         lineItems.push(lineItem);
       } else {
         // Fallback if item not found in catalog
+        const itemName = item.name || item.item || item.product || item.description || 'Unknown Item';
+        const quantity = item.quantity || item.count || item.amount || 1;
+        
         lineItems.push({
-          name: item.name,
-          quantity: String(item.quantity || 1),
-          note: `For: ${customer_name || 'Customer'} - Not in catalog`,
+          name: itemName,
+          quantity: String(quantity),
+          note: `For: ${customerName || 'Customer'} - Not in catalog`,
           base_price_money: {
             amount: 1000, // Default $10.00
             currency: 'USD'
           }
         });
+        
+        console.log(`Added fallback item: ${itemName}, quantity: ${quantity}`);
       }
     }
     
@@ -274,12 +332,15 @@ exports.handler = async (event, context) => {
         throw new Error('Square location ID not configured');
       }
       
+      // First, log our final processed items
+      console.log('Final processed line items for Square:', JSON.stringify(lineItems, null, 2));
+      
       const orderPayload = {
         order: {
           locationId: LOCATION_ID,
           lineItems: lineItems,
           state: 'OPEN',
-          customerNote: `Voice order for ${customer_name || 'Customer'}`,
+          customerNote: `Voice order for ${customerName || 'Customer'}`,
           source: {
             name: 'Burger Rebellion Voice Ordering'
           }
@@ -291,15 +352,20 @@ exports.handler = async (event, context) => {
       console.log(`Using Location ID: ${LOCATION_ID}`);
       
       // Make the API call to Square using SDK
-      const { result } = await squareClient.ordersApi.createOrder(orderPayload);
-      
-      console.log('Order created successfully:', JSON.stringify(result, null, 2));
-      
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify(result)
-      };
+      try {
+        const { result } = await squareClient.ordersApi.createOrder(orderPayload);
+        console.log('Square SDK response:', JSON.stringify(result, null, 2));
+        console.log('Order created successfully:', JSON.stringify(result, null, 2));
+        
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify(result)
+        };
+      } catch (squareSdkError) {
+        console.error('Error from Square SDK:', squareSdkError);
+        throw squareSdkError; // Re-throw to be caught by the outer catch
+      }
     } catch (squareError) {
       // Detailed error logging to diagnose the issue
       console.error('Error creating order in Square:');
