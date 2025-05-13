@@ -1,0 +1,3 @@
+[submodule "elevenlabs-mcp"]
+    path = elevenlabs-mcp
+    url = https://github.com/rahul961004/elevenlabs-mcp.git
