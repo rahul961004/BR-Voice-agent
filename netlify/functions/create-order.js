@@ -1,9 +1,352 @@
 /**
- * Simple serverless function for ElevenLabs webhook to Square integration
- * This is a minimal implementation that prioritizes reliability
+ * ElevenLabs webhook to Square integration for Burger Rebellion
+ * Processes webhook data from ElevenLabs and creates orders in Square sandbox
+ * Enhanced to fetch catalog and map menu items to Square catalog IDs
  */
-const { SquareClient, SquareEnvironment } = require('square');
+const axios = require('axios');
+const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
+
+// Square API URL for Production
+const SQUARE_API_URL = 'https://connect.squareup.com/v2';
+// Square API version
+const SQUARE_API_VERSION = '2025-03-19';
+
+/**
+ * Fetches the Square catalog items and modifiers
+ * @param {string} accessToken - Square API access token
+ * @param {string} locationId - Square API location ID
+ * @returns {Promise<{items: Array, modifiers: Array}>} - Catalog data
+ */
+// Refactored create-order.js to only search for the ordered item and modifiers using textFilter/textQuery
+
+exports.handler = async (event, context) => {
+  try {
+    // Parse incoming order data
+    const { items, customer_name } = JSON.parse(event.body);
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'No items provided in order.' })
+      };
+    }
+    const line = items[0]; // Handle only the first item for brevity
+    const productName = line.name;
+    const quantity = line.quantity ? line.quantity.toString() : '1';
+    const accessToken = process.env.SQUARE_ACCESS_TOKEN;
+    const locationId = process.env.SQUARE_LOCATION_ID;
+    const terminalDeviceId = process.env.TERMINAL_DEVICE_ID;
+    // 1) Search for the exact item by name
+    const itemSearchRes = await axios.post(
+      `${SQUARE_API_URL}/catalog/search-catalog-items`,
+      {
+        text_filter: productName,
+        enabled_location_ids: [locationId],
+        limit: 1
+      },
+      {
+        headers: {
+          'Square-Version': SQUARE_API_VERSION,
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    const matched = (itemSearchRes.data.items || [])[0];
+    if (!matched) {
+      return {
+        statusCode: 404,
+        body: JSON.stringify({ error: `No item found for "${productName}"` })
+      };
+    }
+    const variationId = matched.item_data.variations?.[0]?.id;
+    if (!variationId) {
+      return {
+        statusCode: 404,
+        body: JSON.stringify({ error: `No variation found for item ${matched.id}` })
+      };
+    }
+    // 2) Search each modifier by name
+    let modifierIds = [];
+    if (Array.isArray(line.modifiers) && line.modifiers.length > 0) {
+      for (const modName of line.modifiers) {
+        const modRes = await axios.post(
+          `${SQUARE_API_URL}/catalog/search-catalog-objects`,
+          {
+            object_types: ["MODIFIER"],
+            query: {
+              text_query: { keywords: [modName] }
+            }
+          },
+          {
+            headers: {
+              'Square-Version': SQUARE_API_VERSION,
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        const obj = (modRes.data.objects || [])[0];
+        if (!obj) {
+          return {
+            statusCode: 404,
+            body: JSON.stringify({ error: `No modifier found for "${modName}"` })
+          };
+        }
+        modifierIds.push(obj.id);
+      }
+    }
+    // 3) Create the order
+    const orderPayload = {
+      idempotency_key: uuidv4(),
+      order: {
+        location_id: locationId,
+        line_items: [
+          {
+            catalog_object_id: matched.id,
+            variation_id: variationId,
+            quantity,
+            modifiers: modifierIds.map(id => ({ catalog_object_id: id }))
+          }
+        ],
+        customer_note: customer_name || undefined
+      }
+    };
+    const orderRes = await axios.post(
+      `${SQUARE_API_URL}/orders`,
+      orderPayload,
+      {
+        headers: {
+          'Square-Version': SQUARE_API_VERSION,
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    const order = orderRes.data.order;
+    // 4) (Optional) Send to Terminal for payment if device ID is set
+    let terminalCheckout = null;
+    if (terminalDeviceId && order && order.id && order.total_money) {
+      try {
+        const terminalPayload = {
+          idempotency_key: uuidv4(),
+          checkout: {
+            order_id: order.id,
+            amount_money: order.total_money,
+            device_id: terminalDeviceId
+          }
+        };
+        const terminalRes = await axios.post(
+          `${SQUARE_API_URL}/terminals/checkouts`,
+          terminalPayload,
+          {
+            headers: {
+              'Square-Version': SQUARE_API_VERSION,
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        terminalCheckout = terminalRes.data;
+      } catch (err) {
+        // Log and continue
+        console.error('Terminal checkout error:', err.response?.data || err.message);
+      }
+    }
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ order, terminalCheckout })
+    };
+  } catch (err) {
+    console.error('create-order error:', err);
+    return {
+      statusCode: err.statusCode || 500,
+      body: JSON.stringify({ error: err.message })
+    };
+  }
+};
+
+
+/**
+ * Builds a system prompt containing the menu information
+ * @param {Object} catalog - The catalog data with items and modifiers
+ * @returns {string} - Formatted system prompt with menu items
+ */
+function buildMenuSystemPrompt(catalog) {
+  const { items, modifiers } = catalog;
+  
+  let prompt = 'Here is the current menu:\n';
+  
+  // Add items
+  items.forEach(item => {
+    prompt += `• ${item.name} (item_id=${item.id})\n`;
+    
+    // Add variations
+    if (item.variations && item.variations.length > 0) {
+      prompt += `  – Variations: ${item.variations.map(v => `${v.name}(${v.id})`).join(', ')}\n`;
+    }
+    
+    // Add modifier lists
+    if (item.modifierLists && item.modifierLists.length > 0) {
+      prompt += `  – Modifier lists: ${item.modifierLists.join(', ')}\n`;
+    }
+  });
+  
+  // Add modifiers
+  modifiers.forEach(modifier => {
+    prompt += `• ${modifier.name} (modifier_id=${modifier.id})\n`;
+  });
+  
+  return prompt;
+}
+
+/**
+ * Maps order items to Square catalog objects with improved matching
+ * @param {Array} orderItems - Items from the order request
+ * @param {Object} catalog - Catalog data with items and modifiers
+ * @returns {Array} - Line items with proper catalog IDs
+ */
+function mapOrderItemsToCatalog(orderItems, catalog) {
+  const { items, modifiers } = catalog;
+  
+  // Log available catalog items for debugging
+  console.log('Available catalog items:');
+  items.forEach(item => {
+    console.log(`- ${item.name} (ID: ${item.id})`);
+    if (item.variations && item.variations.length > 0) {
+      item.variations.forEach(v => console.log(`  - Variation: ${v.name} (ID: ${v.id})`));
+    }
+  });
+  
+  return orderItems.map(orderItem => {
+    // Clean up item name for better matching
+    const cleanItemName = (orderItem.name || '').trim().toLowerCase();
+    console.log(`Looking for catalog match for: "${cleanItemName}"`);
+    
+    // Skip if no valid item name
+    if (!cleanItemName) {
+      console.log('Empty item name, skipping');
+      return null;
+    }
+    
+    // Get quantity
+    const quantity = parseInt(orderItem.quantity, 10) || 1;
+    
+    // First try exact match
+    let matchingItem = items.find(item => 
+      item.name.toLowerCase() === cleanItemName);
+    
+    // If no exact match, try partial match
+    if (!matchingItem) {
+      matchingItem = items.find(item => 
+        cleanItemName.includes(item.name.toLowerCase()) || 
+        item.name.toLowerCase().includes(cleanItemName));
+    }
+    
+    // Check if the order item already has a catalog_object_id
+    if (orderItem.catalog_object_id && !orderItem.catalog_object_id.includes('placeholder')) {
+      console.log(`Using provided catalog_object_id: ${orderItem.catalog_object_id}`);
+      
+      // Verify the ID actually exists in our catalog
+      const itemWithProvidedId = items.find(item => item.id === orderItem.catalog_object_id);
+      if (itemWithProvidedId) {
+        // Use the provided ID but get other details from catalog
+        return {
+          quantity: String(quantity),
+          catalog_object_id: orderItem.catalog_object_id,
+          modifiers: processModifiers(orderItem.modifiers, modifiers),
+          note: orderItem.note || ''
+        };
+      }
+    }
+    
+    // If no matching item found
+    if (!matchingItem) {
+      console.log(`No matching item found for: ${orderItem.name}`);
+      // Create a custom line item
+      return {
+        quantity: String(quantity),
+        name: orderItem.name,
+        base_price_money: {
+          amount: 1000, // Default $10.00 CAD
+          currency: 'CAD'
+        },
+        note: orderItem.modifiers?.length > 0 ? `Modifiers: ${orderItem.modifiers.join(', ')}` : ''
+      };
+    }
+    
+    console.log(`Found matching item: ${matchingItem.name} (ID: ${matchingItem.id})`);
+    
+    // Handle variations
+    let variationId = null;
+    
+    // Check if a specific variation_id was provided
+    if (orderItem.variation_id && !orderItem.variation_id.includes('placeholder')) {
+      console.log(`Using provided variation_id: ${orderItem.variation_id}`);
+      // Verify the variation ID exists
+      const matchingVariation = matchingItem.variations?.find(v => v.id === orderItem.variation_id);
+      if (matchingVariation) {
+        variationId = orderItem.variation_id;
+      }
+    }
+    
+    // If no valid variation_id, use the first available variation or the item ID
+    if (!variationId) {
+      variationId = matchingItem.variations?.length > 0 ? 
+        matchingItem.variations[0].id : matchingItem.id;
+      console.log(`Using default variation: ${variationId}`);
+    }
+    
+    // Create line item with catalog IDs
+    return {
+      quantity: String(quantity),
+      catalog_object_id: variationId,
+      modifiers: processModifiers(orderItem.modifiers, modifiers),
+      note: orderItem.note || (orderItem.modifiers?.length > 0 ? 
+        `Modifiers: ${orderItem.modifiers.join(', ')}` : '')
+    };
+  }).filter(Boolean); // Remove any null items
+}
+
+/**
+ * Process modifiers and map them to catalog modifier IDs
+ * @param {Array} requestedModifiers - Modifiers from the order request
+ * @param {Array} catalogModifiers - Available modifiers from catalog
+ * @returns {Array|undefined} - Processed modifiers or undefined if none
+ */
+function processModifiers(requestedModifiers, catalogModifiers) {
+  if (!requestedModifiers || !requestedModifiers.length) {
+    return undefined;
+  }
+  // Only return modifiers with valid catalog_object_id
+  const processedModifiers = requestedModifiers.map(mod => {
+    if (typeof mod === 'object' && mod.catalog_object_id) {
+      return { catalog_object_id: mod.catalog_object_id };
+    }
+    const modName = typeof mod === 'string' ? mod : mod.name || '';
+    const cleanModName = modName.trim().toLowerCase();
+    const matchingMod = catalogModifiers.find(m =>
+      m.name.toLowerCase() === cleanModName ||
+      m.name.toLowerCase().includes(cleanModName) ||
+      cleanModName.includes(m.name.toLowerCase())
+    );
+    if (matchingMod) {
+      return { catalog_object_id: matchingMod.id };
+    }
+    // If no match, do NOT return anything (Square will reject it)
+    return null;
+  }).filter(Boolean); // Remove nulls
+  return processedModifiers.length > 0 ? processedModifiers : undefined;
+}
+
+// Function to generate a UUID for idempotency keys
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 
 exports.handler = async (event, context) => {
   // Set CORS headers for all responses
@@ -21,496 +364,207 @@ exports.handler = async (event, context) => {
     };
   }
   
-  // Log all request details for debugging
+  // Log request details for debugging
   console.log('Request method:', event.httpMethod);
   console.log('Request headers:', JSON.stringify(event.headers, null, 2));
   console.log('Raw request body:', event.body);
   
+  // Get Square credentials
+  const SQUARE_ACCESS_TOKEN = process.env.SQUARE_ACCESS_TOKEN;
+  // Use the production location ID from environment variables
+  const LOCATION_ID = process.env.SQUARE_LOCATION_ID;
+  
+  console.log('Using production environment with location ID:', LOCATION_ID);
+  
+  if (!SQUARE_ACCESS_TOKEN || !LOCATION_ID) {
+    return {
+      statusCode: 400,
+      headers,
+      body: JSON.stringify({ 
+        success: false, 
+        error: 'Missing Square credentials (SQUARE_ACCESS_TOKEN or LOCATION_ID)'
+      })
+    };
+  }
+  
   try {
-    // Check if environment variables are set correctly
-    const SQUARE_ACCESS_TOKEN = process.env.SQUARE_ACCESS_TOKEN;
-    const LOCATION_ID = process.env.LOCATION_ID;
+    // Step 1: Fetch Square catalog data
+    const catalog = await fetchSquareCatalog(SQUARE_ACCESS_TOKEN, LOCATION_ID);
     
-    console.log(`SQUARE_ACCESS_TOKEN present: ${SQUARE_ACCESS_TOKEN ? 'Yes (redacted)' : 'No'}`);
-    console.log(`LOCATION_ID present: ${LOCATION_ID ? LOCATION_ID : 'No'}`);
+    // Step 2: Build system prompt with menu items
+    const menuPrompt = buildMenuSystemPrompt(catalog);
+    console.log('Generated menu prompt for ElevenLabs agent');
     
-    // Parse the incoming webhook data
+    // Parse the incoming webhook data from ElevenLabs
     let webhookData;
+    let orderItems = [];
+    let customerName = 'Unknown Customer';
+    
     try {
-      webhookData = JSON.parse(event.body);
-      console.log('Parsed webhook data:', JSON.stringify(webhookData, null, 2));
+      // Parse the webhook data, which could be in different formats depending on ElevenLabs
+      const parsedBody = JSON.parse(event.body);
+      console.log('Parsed webhook data:', JSON.stringify(parsedBody, null, 2));
+      
+      // Handle different data formats from ElevenLabs
+      if (parsedBody.type === 'elevenlabs-convai' && parsedBody.action === 'order_confirmed') {
+        // Format 1: ElevenLabs standard webhook format
+        customerName = parsedBody.data?.customer_name || 'Unknown Customer';
+        orderItems = Array.isArray(parsedBody.data?.items) ? parsedBody.data.items : [];
+      } else if (parsedBody.transcript) {
+        // Format 2: ElevenLabs transcript format
+        customerName = parsedBody.name || parsedBody.customer_name || 'Unknown Customer';
+        
+        // Try to extract orders from transcript - this is a fallback
+        // In this case, we'd need to do some NLP to extract items
+        console.log('Received transcript format, attempting to extract order data');
+        // For now, just log the transcript
+        console.log('Transcript:', parsedBody.transcript);
+        
+        // Extract items - simple direct format
+        if (parsedBody.items && Array.isArray(parsedBody.items)) {
+          orderItems = parsedBody.items;
+        }
+      } else {
+        // Format 3: Direct format as provided in our example
+        customerName = parsedBody.customer_name || 'Unknown Customer';
+        orderItems = Array.isArray(parsedBody.items) ? parsedBody.items : [];
+      }
     } catch (parseError) {
       console.error('Error parsing webhook data:', parseError.message);
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ success: false, error: 'Invalid JSON in request body' })
+        body: JSON.stringify({ 
+          success: false, 
+          error: 'Invalid JSON in request body',
+          menu_prompt: menuPrompt 
+        })
       };
     }
-    
-    // Extract customer name and items from the webhook data
-    const customerName = webhookData.customer_name || 'Unknown Customer';
-    const orderItems = Array.isArray(webhookData.items) ? webhookData.items : [];
     
     console.log(`Extracted customer name: ${customerName}`);
     console.log(`Extracted ${orderItems.length} order items:`, JSON.stringify(orderItems, null, 2));
     
-    // Initialize Square client
-    const squareClient = new SquareClient({
-      accessToken: SQUARE_ACCESS_TOKEN,
-      environment: SquareEnvironment.Sandbox
-    });
+    if (orderItems.length === 0) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: 'No items in order',
+          menu_prompt: menuPrompt // Include menu prompt even on error
+        })
+      };
+    }
     
-    // Prepare line items for Square
-    const lineItems = orderItems.map(item => ({
-      name: item.name || 'Unknown Item',
-      quantity: String(item.quantity || 1),
-      basePriceMoney: {
-        amount: 1000, // Default price $10.00
-        currency: 'USD'
-      },
-      note: item.modifiers && item.modifiers.length > 0 ? 
-        `Modifiers: ${item.modifiers.join(', ')}` : undefined
-    }));
-    
-    // Create order payload
-    const orderPayload = {
-      order: {
-        locationId: LOCATION_ID,
-        lineItems: lineItems,
-        state: 'OPEN',
-        customerNote: `Voice order for ${customerName}`
-      },
-      idempotencyKey: `voice-order-${Date.now()}`
-    };
-    
-    console.log('Sending order to Square:', JSON.stringify(orderPayload, null, 2));
-    
-    // Create order in Square
-    const { result } = await squareClient.ordersApi.createOrder(orderPayload);
-    console.log('Order created successfully:', JSON.stringify(result, null, 2));
-    
-    // Return success response
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ 
-        success: true, 
-        message: 'Order created successfully', 
-        order_id: result.order.id 
-      })
-    };
+    try {
+      // Step 3: Map order items to catalog items
+      const catalogLineItems = mapOrderItemsToCatalog(orderItems, catalog);
+      console.log('Mapped order items to catalog:', JSON.stringify(catalogLineItems, null, 2));
+      
+      const idempotencyKey = generateUUID();
+      
+      // Step 4: Create order payload with catalog object IDs
+      const orderPayload = {
+        idempotency_key: idempotencyKey,
+        order: {
+          location_id: LOCATION_ID,
+          line_items: catalogLineItems,
+          state: 'OPEN',
+          customer_note: `Voice order for ${customerName}`,
+          source: {
+            name: 'ElevenLabs Voice Ordering'
+          }
+        }
+      };
+      
+      console.log('Creating order with payload:', JSON.stringify(orderPayload, null, 2));
+      
+      // Make Square API call to create order
+      const squareResponse = await axios.post(`${SQUARE_API_URL}/orders`, orderPayload, {
+        headers: {
+          'Square-Version': SQUARE_API_VERSION,
+          'Authorization': `Bearer ${SQUARE_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      console.log('Order created successfully:', JSON.stringify(squareResponse.data, null, 2));
+      const orderId = squareResponse.data.order?.id;
+      // Step 5: Create payment for the order
+      let paymentResult = null;
+      if (orderId) {
+        try {
+          // Calculate amount from order total_money
+          const amountMoney = squareResponse.data.order?.total_money;
+          if (!amountMoney) throw new Error('Order total_money missing, cannot create payment.');
+          // Use a fake nonce for testing or require a real card nonce for production
+          // For production, replace 'cnon:card-nonce-ok' with a real card nonce from Square payment form
+          const paymentPayload = {
+            idempotency_key: `${idempotencyKey}-pay`,
+            amount_money: amountMoney,
+            source_id: 'cnon:card-nonce-ok', // Replace with real card nonce in production
+            order_id: orderId,
+            location_id: LOCATION_ID
+          };
+          const paymentResp = await axios.post(`${SQUARE_API_URL}/payments`, paymentPayload, {
+            headers: {
+              'Square-Version': SQUARE_API_VERSION,
+              'Authorization': `Bearer ${SQUARE_ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          paymentResult = paymentResp.data;
+          console.log('Payment created successfully:', JSON.stringify(paymentResult, null, 2));
+        } catch (paymentErr) {
+          console.error('Payment creation failed:', paymentErr.response?.data || paymentErr.message);
+          paymentResult = { error: paymentErr.response?.data || paymentErr.message };
+        }
+      }
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: true,
+          message: 'Order created successfully in Square',
+          order_id: orderId || 'unknown',
+          order_data: squareResponse.data,
+          payment: paymentResult,
+          menu_prompt: menuPrompt // Include menu prompt in successful response
+        })
+      };
+
+    } catch (squareError) {
+      console.error('Error creating order:', squareError.response?.data || squareError.message);
+      
+      // Return a consistent error response
+      return {
+        statusCode: 200, // Return 200 even on error to prevent webhook retries
+        headers,
+        body: JSON.stringify({
+          success: false,
+          message: 'Error creating order in Square',
+          error: squareError.response?.data?.errors || squareError.message,
+          webhook_received: true,
+          menu_prompt: menuPrompt // Include menu prompt in error response
+        })
+      };
+    }
   } catch (error) {
     // Log the full error for debugging
-    console.error('Error processing order:', error);
+    console.error('Error processing webhook:', error);
     
     // Return a helpful error response
     return {
       statusCode: 200, // Return 200 even on error to prevent webhook retries
       headers,
-      body: JSON.stringify({ 
-        success: false, 
-        message: 'Error processing order', 
-        error: error.message,
-        webhook_received: true
-      })
-    };
-  }
-};
-function findCatalogItem(catalogCache, itemName) {
-  if (!itemName) return null;
-  
-  const normalizedName = itemName.toLowerCase().trim();
-  
-  // Use a demo catalog for testing if needed
-  if (!catalogCache || catalogCache.length === 0) {
-    catalogCache = getDemoCatalog();
-  }
-  
-  // Look for best match
-  let bestMatch = null;
-  let bestScore = 0;
-  
-  for (const item of catalogCache) {
-    // Check for item type
-    if (item.type === 'ITEM' && item.itemData && item.itemData.name) {
-      const catalogItemName = item.itemData.name.toLowerCase().trim();
-      
-      // Calculate similarity score (simple contains check)
-      let score = 0;
-      if (catalogItemName === normalizedName) {
-        score = 100; // Exact match
-      } else if (catalogItemName.includes(normalizedName) || normalizedName.includes(catalogItemName)) {
-        // Partial match - give higher score to closer length matches
-        const lengthDiff = Math.abs(catalogItemName.length - normalizedName.length);
-        score = 90 - lengthDiff;
-      }
-      
-      if (score > bestScore) {
-        // Find variation ID for this item
-        let variationId = null;
-        
-        // First check for variations defined in the item
-        if (item.itemData.variations && item.itemData.variations.length > 0) {
-          variationId = item.itemData.variations[0].id;
-        }
-        
-        // Then look for actual variation objects
-        if (!variationId) {
-          for (const variation of catalogCache) {
-            if (variation.type === 'ITEM_VARIATION' && 
-                variation.itemVariationData && 
-                variation.itemVariationData.itemId === item.id) {
-              variationId = variation.id;
-              break;
-            }
-          }
-        }
-        
-        bestMatch = {
-          itemId: item.id,
-          name: item.itemData.name,
-          variationId: variationId
-        };
-        bestScore = score;
-      }
-    }
-  }
-  
-  return bestMatch;
-}
-
-// Provide a demo catalog for testing
-function getDemoCatalog() {
-  return [
-    {
-      id: 'item_1',
-      type: 'ITEM',
-      itemData: {
-        name: 'Rebel Burger',
-        description: 'Classic burger with cheese, lettuce, and special sauce',
-        variations: [{ id: 'var_1' }]
-      }
-    },
-    {
-      id: 'var_1',
-      type: 'ITEM_VARIATION',
-      itemVariationData: {
-        itemId: 'item_1',
-        name: 'Regular',
-        priceMoney: { amount: 899, currency: 'USD' }
-      }
-    },
-    {
-      id: 'item_2',
-      type: 'ITEM',
-      itemData: {
-        name: 'Fries',
-        description: 'Crispy golden fries',
-        variations: [{ id: 'var_2' }]
-      }
-    },
-    {
-      id: 'var_2',
-      type: 'ITEM_VARIATION',
-      itemVariationData: {
-        itemId: 'item_2',
-        name: 'Regular',
-        priceMoney: { amount: 399, currency: 'USD' }
-      }
-    },
-    {
-      id: 'item_3',
-      type: 'ITEM',
-      itemData: {
-        name: 'Coke',
-        description: 'Refreshing cola',
-        variations: [{ id: 'var_3' }]
-      }
-    },
-    {
-      id: 'var_3',
-      type: 'ITEM_VARIATION',
-      itemVariationData: {
-        itemId: 'item_3',
-        name: 'Regular',
-        priceMoney: { amount: 299, currency: 'USD' }
-      }
-    }
-  ];
-}
-
-// Handler for Netlify serverless function
-exports.handler = async (event, context) => {
-  // Set CORS headers for all responses
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
-  };
-  
-  // Handle preflight OPTIONS request
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 204,
-      headers
-    };
-  }
-  
-  // Only allow POST requests
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers,
-      body: JSON.stringify({ error: 'Method not allowed' })
-    };
-  }
-  
-  try {
-    // Parse request body
-    console.log('Raw request body:', event.body);
-    const requestBody = JSON.parse(event.body);
-    console.log('Parsed request body:', JSON.stringify(requestBody, null, 2));
-    
-    // Extract data - be flexible with format that might come from ElevenLabs
-    let customerName = '';
-    let orderItems = [];
-    
-    // Check for typical properties we might receive
-    if (requestBody.customer_name) {
-      customerName = requestBody.customer_name;
-    } else if (requestBody.customerName) {
-      customerName = requestBody.customerName;
-    } else if (requestBody.name) {
-      customerName = requestBody.name;
-    }
-    
-    // Check for items array in different possible formats
-    if (Array.isArray(requestBody.items)) {
-      orderItems = requestBody.items;
-    } else if (Array.isArray(requestBody.orderItems)) {
-      orderItems = requestBody.orderItems;
-    } else if (requestBody.order && Array.isArray(requestBody.order.items)) {
-      orderItems = requestBody.order.items;
-    } else if (typeof requestBody === 'object') {
-      // Try to extract items from the structure if they're not in an expected format
-      for (const key in requestBody) {
-        if (Array.isArray(requestBody[key])) {
-          const possibleItems = requestBody[key];
-          if (possibleItems.length > 0 && 
-              (possibleItems[0].name || possibleItems[0].item || possibleItems[0].product)) {
-            orderItems = possibleItems;
-            break;
-          }
-        }
-      }
-    }
-    
-    console.log('Extracted customer name:', customerName);
-    console.log('Extracted order items:', JSON.stringify(orderItems, null, 2));
-    
-    if (!orderItems || !Array.isArray(orderItems) || orderItems.length === 0) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ 
-          error: 'No items provided in the order',
-          receivedData: requestBody 
-        })
-      };
-    }
-    
-    // Create a demo catalog for testing
-    const catalogCache = getDemoCatalog();
-    
-    // Match items to catalog
-    const lineItems = [];
-    
-    for (const item of orderItems) {
-      // Extract item name - be flexible with the property name
-      const itemName = item.name || item.item || item.product || item.description || '';
-      
-      // Log what we're processing
-      console.log(`Processing item: ${JSON.stringify(item)}`);
-      console.log(`Extracted item name: ${itemName}`);
-      
-      // Find matching item in catalog
-      const catalogItem = findCatalogItem(catalogCache, itemName);
-      
-      if (catalogItem) {
-        // Create Square line item - be flexible with the quantity property
-        const quantity = item.quantity || item.count || item.amount || 1;
-        console.log(`Item quantity: ${quantity}`);
-        
-        const lineItem = {
-          quantity: String(quantity),
-          note: customerName ? `For: ${customerName}` : undefined
-        };
-        
-        // Add catalog object ID if we found a match
-        if (catalogItem.variationId) {
-          lineItem.catalog_object_id = catalogItem.variationId;
-        } else {
-          lineItem.name = item.name;
-          lineItem.base_price_money = {
-            amount: 1000, // Default $10.00 if not found
-            currency: 'USD'
-          };
-        }
-        
-        // Add modifiers if present - be flexible with different property names
-        const modifiers = item.modifiers || item.modifications || item.options || [];
-        if (Array.isArray(modifiers) && modifiers.length > 0) {
-          const validModifiers = modifiers.filter(mod => mod && mod !== '');
-          if (validModifiers.length > 0) {
-            lineItem.note = (lineItem.note || '') + ` - Mods: ${validModifiers.join(', ')}`;
-          }
-        } else if (typeof item.modifiers === 'string' && item.modifiers.trim() !== '') {
-          // Handle case where modifiers might be a single string
-          lineItem.note = (lineItem.note || '') + ` - Mods: ${item.modifiers.trim()}`;
-        }
-        
-        lineItems.push(lineItem);
-      } else {
-        // Fallback if item not found in catalog
-        const itemName = item.name || item.item || item.product || item.description || 'Unknown Item';
-        const quantity = item.quantity || item.count || item.amount || 1;
-        
-        lineItems.push({
-          name: itemName,
-          quantity: String(quantity),
-          note: `For: ${customerName || 'Customer'} - Not in catalog`,
-          base_price_money: {
-            amount: 1000, // Default $10.00
-            currency: 'USD'
-          }
-        });
-        
-        console.log(`Added fallback item: ${itemName}, quantity: ${quantity}`);
-      }
-    }
-    
-    // Create order in Square using the SDK
-    try {
-      if (!squareClient) {
-        throw new Error('Square client not initialized');
-      }
-      
-      if (!LOCATION_ID) {
-        throw new Error('Square location ID not configured');
-      }
-      
-      // First, log our final processed items
-      console.log('Final processed line items for Square:', JSON.stringify(lineItems, null, 2));
-      
-      const orderPayload = {
-        order: {
-          locationId: LOCATION_ID,
-          lineItems: lineItems,
-          state: 'OPEN',
-          customerNote: `Voice order for ${customerName || 'Customer'}`,
-          source: {
-            name: 'Burger Rebellion Voice Ordering'
-          }
-        },
-        idempotencyKey: `voice-order-${Date.now()}`
-      };
-      
-      console.log('Sending order to Square using SDK:', JSON.stringify(orderPayload, null, 2));
-      console.log(`Using Location ID: ${LOCATION_ID}`);
-      
-      // Make the API call to Square using SDK
-      try {
-        // Check if the line items array is valid and not empty
-        if (!lineItems || lineItems.length === 0) {
-          throw new Error('Cannot create order: No valid line items to send to Square');
-        }
-        
-        // Make sure we have a valid location ID
-        if (!LOCATION_ID) {
-          throw new Error('Cannot create order: Missing Square location ID');
-        }
-
-        // Verify that our Square client is properly initialized
-        if (!squareClient || !squareClient.ordersApi) {
-          throw new Error('Cannot create order: Square SDK client not properly initialized');
-        }
-        
-        // Make the API call with proper error handling
-        const { result } = await squareClient.ordersApi.createOrder(orderPayload);
-        
-        console.log('Square SDK response:', JSON.stringify(result, null, 2));
-        console.log('Order created successfully:', JSON.stringify(result, null, 2));
-        
-        // Return successful response
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({
-            success: true,
-            message: 'Order created successfully',
-            order_id: result.order?.id,
-            order: result
-          })
-        };
-      } catch (squareSdkError) {
-        console.error('Error from Square SDK:', squareSdkError);
-        
-        // Return a more meaningful error that includes the specific SDK error details
-        return {
-          statusCode: 422, // Unprocessable Entity - better than 500 for client debugging
-          headers,
-          body: JSON.stringify({
-            success: false,
-            message: 'Failed to create order in Square',
-            error: squareSdkError.message,
-            details: squareSdkError.errors || [],
-            data_sent: orderPayload
-          })
-        };
-      }
-    } catch (squareError) {
-      // Detailed error logging to diagnose the issue
-      console.error('Error creating order in Square:');
-      
-      if (squareError instanceof SquareError) {
-        // This is a Square-specific error with more details
-        console.error('Square API Error:');
-        
-        // Log each error in the array
-        squareError.errors.forEach(error => {
-          console.error('Category:', error.category);
-          console.error('Code:', error.code);
-          console.error('Detail:', error.detail);
-        });
-        
-        // Return error response to client
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({
-            success: false,
-            message: 'Failed to create order in Square',
-            error: squareError.message,
-            received_data: requestBody,
-            extracted_data: {
-              customer_name: customerName,
-              line_items: orderItems
-            }
-          })
-        };
-      }
-    }
-  } catch (error) {
-    console.error('Error processing order:', error.message);
-    
-    return {
-      statusCode: 500,
-      headers,
       body: JSON.stringify({
-        error: 'Failed to process order',
-        details: error.message
+        success: false,
+        message: 'Error processing order',
+        error: error.message,
+        webhook_received: true,
+        menu_prompt: catalog ? buildMenuSystemPrompt(catalog) : 'Menu not available due to error'
       })
     };
   }
 };
+

@@ -3,14 +3,14 @@
     "elevenlabs": {
       "url": "http://localhost:5001",
       "env": {
-        "ELEVENLABS_API_KEY": "EAAAl5SM50YDIQl1SsC4xJbgqI3t114MBEn02nhI-kzNpBJ7qmHZYCKI0JE_gFNt"
+        "ELEVENLABS_API_KEY": "sk_38a894f577e06167f2475876399821b006c45b34d6d96086"
       }
     },
     "square": {
       "url": "https://connect.squareupsandbox.com",
       "env": {
-        "SQUARE_ACCESS_TOKEN": "EAAAl5SM50YDIQl1SsC4xJbgqI3t114MBEn02nhI-kzNpBJ7qmHZYCKI0JE_gFNt",
-        "LOCATION_ID": "L165PVGQ2WPNG"
+        "SQUARE_ACCESS_TOKEN": "EAAAlheXKEvyA-AycISlBNgR3YB8aM3ZQ7wcVFIIJXKIP9RQEYcAQ7xuSabuTmL1",
+        "LOCATION_ID": "EFE456KT81AYE"
       }
     },
     "mcp": {

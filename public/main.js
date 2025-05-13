@@ -1,5 +1,8 @@
 // Burger Rebellion Voice Ordering - Main Script
 document.addEventListener('DOMContentLoaded', async function() {
+  // Fetch menu items from Square
+  fetchMenuItems();
+  
   // Application state
   let customerName = '';
   let orderItems = [];
@@ -437,6 +440,66 @@ document.addEventListener('DOMContentLoaded', async function() {
   async function init() {
     console.log('Initializing Burger Rebellion Voice Ordering app');
     loadElevenLabsWidget();
+  }
+
+  // Fetch menu items from Square API
+  async function fetchMenuItems() {
+    try {
+      console.log('Fetching menu items from Square...');
+      const response = await fetch('/.netlify/functions/get-menu');
+      const data = await response.json();
+      
+      if (data.success && data.menu_items) {
+        console.log('Menu items loaded:', data.menu_items);
+        displayMenuItems(data.menu_items);
+      } else {
+        console.error('Error loading menu items:', data.error || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('Failed to fetch menu:', error);
+    }
+  }
+
+  // Display menu items in the UI
+  function displayMenuItems(menuItems) {
+    const menuContainer = document.getElementById('menu-container');
+    if (!menuContainer) return;
+    
+    menuContainer.innerHTML = '';
+    
+    // Create menu header
+    const menuHeader = document.createElement('h3');
+    menuHeader.textContent = 'Menu Items';
+    menuContainer.appendChild(menuHeader);
+    
+    // Create menu item grid
+    const menuGrid = document.createElement('div');
+    menuGrid.className = 'menu-grid';
+    
+    menuItems.forEach(item => {
+      const menuItemEl = document.createElement('div');
+      menuItemEl.className = 'menu-item';
+      
+      const itemName = document.createElement('h4');
+      itemName.textContent = item.name;
+      menuItemEl.appendChild(itemName);
+      
+      if (item.description) {
+        const itemDesc = document.createElement('p');
+        itemDesc.className = 'menu-item-desc';
+        itemDesc.textContent = item.description;
+        menuItemEl.appendChild(itemDesc);
+      }
+      
+      const itemPrice = document.createElement('p');
+      itemPrice.className = 'menu-item-price';
+      itemPrice.textContent = `$${(item.price/100).toFixed(2)} ${item.currency}`;
+      menuItemEl.appendChild(itemPrice);
+      
+      menuGrid.appendChild(menuItemEl);
+    });
+    
+    menuContainer.appendChild(menuGrid);
   }
 
   // Start the application
