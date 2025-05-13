@@ -6,7 +6,7 @@ const client = new SquareClient({
 
 export async function handler(event) {
   try {
-    const { text_filter, enabled_location_ids, limit } = JSON.parse(event.body);
+    const { text_filter, enabled_location_ids, limit } = JSON.parse(event.body || '{}');
     const resp = await client.catalogApi.searchCatalogItems({
       textFilter: text_filter,
       enabledLocationIds: enabled_location_ids,
@@ -23,3 +23,4 @@ export async function handler(event) {
     };
   }
 }
+

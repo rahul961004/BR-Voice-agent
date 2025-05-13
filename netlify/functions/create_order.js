@@ -6,7 +6,7 @@ const client = new SquareClient({
 
 export async function handler(event) {
   try {
-    const { location_id, line_items } = JSON.parse(event.body);
+    const { location_id, line_items } = JSON.parse(event.body || '{}');
     const resp = await client.ordersApi.createOrder({
       order: {
         locationId: location_id,
@@ -25,3 +25,4 @@ export async function handler(event) {
     };
   }
 }
+

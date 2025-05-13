@@ -6,7 +6,7 @@ const client = new SquareClient({
 
 export async function handler(event) {
   try {
-    const { text_query, object_types } = JSON.parse(event.body);
+    const { text_query, object_types } = JSON.parse(event.body || '{}');
     const resp = await client.catalogApi.searchCatalogObjects({
       objectTypes: object_types,
       query: { textQuery: text_query }
@@ -22,3 +22,4 @@ export async function handler(event) {
     };
   }
 }
+

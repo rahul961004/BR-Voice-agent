@@ -9,10 +9,10 @@ export async function handler(event) {
     return { statusCode: 405, body: JSON.stringify({ error: "Method Not Allowed" }) };
   }
   try {
-    const resp = await client.catalogApi.listCatalog(undefined, "ITEM,MODIFIER");
+    const resp = await client.catalogApi.listCatalog(undefined, ["ITEM", "MODIFIER"]);
     return {
       statusCode: 200,
-      body: JSON.stringify({ items: resp.result.objects || [] })
+      body: JSON.stringify({ objects: resp.result.objects || [] })
     };
   } catch (err) {
     return {
@@ -21,3 +21,4 @@ export async function handler(event) {
     };
   }
 }
+

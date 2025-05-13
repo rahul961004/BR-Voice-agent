@@ -6,7 +6,7 @@ const client = new SquareClient({
 
 export async function handler(event) {
   try {
-    const { idempotency_key, checkout } = JSON.parse(event.body);
+    const { idempotency_key, checkout } = JSON.parse(event.body || '{}');
     const resp = await client.terminalApi.createTerminalCheckout({
       idempotencyKey: idempotency_key,
       checkout
@@ -22,3 +22,4 @@ export async function handler(event) {
     };
   }
 }
+
