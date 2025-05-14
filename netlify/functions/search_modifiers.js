@@ -1,24 +1,26 @@
-import { SquareClient, Environment } from "@square/square";
-const client = new SquareClient({
-  environment: Environment.Production,
+import { Client, Environment } from "square";
+
+const client = new Client({
   accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment: Environment.Production,
+  additionalHeaders: { 'Square-Version': '2025-04-16' }
 });
 
 export async function handler(event) {
   try {
     const { text_query, object_types } = JSON.parse(event.body || '{}');
-    const resp = await client.catalogApi.searchCatalogObjects({
+    const response = await client.catalogApi.searchCatalogObjects({
       objectTypes: object_types,
       query: { textQuery: text_query }
     });
     return {
       statusCode: 200,
-      body: JSON.stringify({ objects: resp.result.objects || [] })
+      body: JSON.stringify({ objects: response.result.objects || [] })
     };
   } catch (err) {
     return {
-      statusCode: 500,
-      body: JSON.stringify({ error: err.message })
+      statusCode: err.statusCode || 500,
+      body: JSON.stringify({ error: err.message || String(err) })
     };
   }
 }

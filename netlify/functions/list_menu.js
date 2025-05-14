@@ -1,24 +1,24 @@
-import { SquareClient, Environment } from "@square/square";
-const client = new SquareClient({
-  environment: Environment.Production,
+import { Client, Environment } from "square";
+
+const client = new Client({
   accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment: Environment.Production,
+  additionalHeaders: { 'Square-Version': '2025-04-16' }
 });
 
 export async function handler(event) {
-  if (event.httpMethod !== "GET") {
-    return { statusCode: 405, body: JSON.stringify({ error: "Method Not Allowed" }) };
-  }
   try {
-    const resp = await client.catalogApi.listCatalog(undefined, ["ITEM", "MODIFIER"]);
+    const response = await client.catalogApi.listCatalog(undefined, ['ITEM', 'MODIFIER']);
     return {
       statusCode: 200,
-      body: JSON.stringify({ objects: resp.result.objects || [] })
+      body: JSON.stringify({ items: response.result.objects || [] })
     };
   } catch (err) {
     return {
-      statusCode: 500,
-      body: JSON.stringify({ error: err.message })
+      statusCode: err.statusCode || 500,
+      body: JSON.stringify({ error: err.message || String(err) })
     };
   }
 }
+
 

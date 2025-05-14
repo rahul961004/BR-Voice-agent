@@ -1,0 +1,7 @@
+Deleted files and folders related to MCP or elevenlabs-mcp:
+- netlify/functions/create-order.js
+- netlify/functions/get-menu.js
+- elevenlabs-mcp/tests/conftest.py
+- elevenlabs-mcp/tests/test_utils.py
+
+No codebase references to 'mcp' or 'elevenlabs-mcp' remain after this cleanup.

@@ -16,7 +16,7 @@
     "express": "^4.21.2",
     "https": "^1.0.0",
     "square": "^42.2.0",
-    "square-mcp-server": "github:square/square-mcp-server",
+
     "uuid": "^11.1.0"
   },
   "devDependencies": {
