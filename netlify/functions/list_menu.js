@@ -1,10 +1,4 @@
-import { SquareClient } from "square";
-
-// Explicitly define environment to avoid import issues
-const Environment = {
-  Production: 'https://connect.squareup.com',
-  Sandbox: 'https://connect.squareupsandbox.com'
-};
+import { Client, Environment } from "square";
 
 export async function handler(event) {
   // Enhanced logging for comprehensive debugging
@@ -67,9 +61,10 @@ export async function handler(event) {
       locationIdProvided: !!process.env.SQUARE_LOCATION_ID
     });
 
-    const client = new SquareClient({
+    const client = new Client({
       accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: Environment.Production
+      environment: Environment.Production,
+      squareVersion: '2025-03-19'
     });
 
     // Search Catalog Items 
@@ -77,20 +72,11 @@ export async function handler(event) {
       locationId: process.env.SQUARE_LOCATION_ID || 'Not Specified'
     });
 
-    const response = await client.catalogApi.searchCatalogObjects({
-      objectTypes: ['ITEM'],
-      query: {
-        filterClause: {
-          predicates: [{
-            attributeName: 'type',
-            attributeValue: 'ITEM'
-          }]
-        }
-      }
-    });
+    const response = await client.catalogApi.listCatalog(undefined, ['ITEM', 'MODIFIER']);
     
     // Validate Response
-    if (!response.objects || response.objects.length === 0) {
+    const objects = response.result.objects;
+    if (!objects || objects.length === 0) {
       console.warn('No catalog items found', {
         responseStatus: response.statusCode,
         responseBody: JSON.stringify(response)
@@ -108,19 +94,16 @@ export async function handler(event) {
       };
     }
 
-    // Transform Catalog Items
-    const transformedItems = response.objects
-      .filter(item => item.type === 'ITEM')
-      .map(item => {
-        const variation = item.itemData.variations?.[0]?.itemVariationData;
-        return {
-          id: item.id,
-          name: item.itemData.name || 'Unnamed Item',
-          description: item.itemData.description || '',
-          price: variation?.priceMoney?.amount || 0,
-          currency: variation?.priceMoney?.currency || 'USD'
-        };
-      });
+    // Transform Catalog Items to include full item_data
+    const transformedItems = objects.map(item => ({
+      id: item.id,
+      item_data: {
+        name: item.itemData?.name || '',
+        description: item.itemData?.description || '',
+        variations: item.itemData?.variations || [],
+        modifier_list_info: item.itemData?.modifierListInfo || []
+      }
+    }));
 
     console.log(`Transformed ${transformedItems.length} menu items`);
 

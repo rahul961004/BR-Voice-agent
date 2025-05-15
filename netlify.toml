@@ -1,14 +1,12 @@
 [build]
-  publish = "public"
-  command = ""
   functions = "netlify/functions"
-
-[dev]
   publish = "public"
-  port = 8888
-  autoLaunch = true
+
+[build.environment]
+  NODE_VERSION = "16"
+  NPM_FLAGS = "--legacy-peer-deps"
 
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
+  from = "/*"
+  to = "/index.html"
   status = 200
