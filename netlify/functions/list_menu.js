@@ -59,7 +59,7 @@ exports.handler = async function(event) {
     // Create Square Client
     const client = new Client({
       accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: Environment.Production,
+      environment: 'production',
       squareVersion: '2025-03-19'
     });
 

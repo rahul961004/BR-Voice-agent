@@ -109,7 +109,7 @@ When your Netlify site is deployed, you'll need to configure the ElevenLabs Webh
 
 - `index.html`: Main HTML file with the embedded widget
 - `main.js`: JavaScript logic for processing orders and integrating with Square
-- `mcp_config.json`: Configuration file for MCP servers and environment variables
+
 
 ## Customization
 
