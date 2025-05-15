@@ -1,5 +1,5 @@
 // Use CommonJS require for Netlify compatibility
-const { Client } = require('square');
+const square = require('square');
 
 exports.handler = async function(event) {
   // Enhanced logging for comprehensive debugging
@@ -57,18 +57,19 @@ exports.handler = async function(event) {
 
   try {
     // Create Square Client with production environment
-    const client = new Client({
+    const client = new square.Client({
       accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: 'production'
+      environment: 'production'  // or 'sandbox' for testing
     });
 
-    // Use the catalog API to list items
-    const response = await client.catalogApi.searchCatalogItems({
-      enabledLocationIds: process.env.SQUARE_LOCATION_ID ? [process.env.SQUARE_LOCATION_ID] : undefined,
-      productTypes: ['REGULAR']
+    // Use the catalog API to search for items
+    const { result } = await client.catalogApi.searchCatalogObjects({
+      objectTypes: ['ITEM'],
+      includeRelatedObjects: true
     });
 
-    const items = response.result.items || [];
+    const items = result.objects || [];
+    const relatedObjects = result.relatedObjects || [];
 
     if (!items.length) {
       return {
@@ -102,8 +103,12 @@ exports.handler = async function(event) {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET'
       },
-      body: JSON.stringify(transformedItems)
+      body: JSON.stringify({
+        items: transformedItems,
+        relatedObjects: relatedObjects
+      })
     };
+
   } catch (error) {
     // Comprehensive Error Logging
     console.error('Menu Retrieval Error', {
