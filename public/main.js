@@ -436,24 +436,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   }
 
-  // Initialize the application
-  async function init() {
-    console.log('Initializing Burger Rebellion Voice Ordering app');
-    loadElevenLabsWidget();
-  }
-
   // Fetch menu items from Square API
   async function fetchMenuItems() {
     try {
       console.log('Fetching menu items from Square...');
-      const response = await fetch('/.netlify/functions/get-menu');
-      const data = await response.json();
+      const response = await fetch('/.netlify/functions/list_menu');
+      const menuItems = await response.json();
       
-      if (data.success && data.menu_items) {
-        console.log('Menu items loaded:', data.menu_items);
-        displayMenuItems(data.menu_items);
+      if (menuItems && menuItems.length > 0) {
+        console.log('Menu items loaded:', menuItems);
+        displayMenuItems(menuItems);
       } else {
-        console.error('Error loading menu items:', data.error || 'Unknown error');
+        console.error('Error loading menu items: No items found');
       }
     } catch (error) {
       console.error('Failed to fetch menu:', error);
@@ -500,6 +494,13 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
     
     menuContainer.appendChild(menuGrid);
+  }
+
+  // Initialize the application
+  async function init() {
+    console.log('Initializing Burger Rebellion Voice Ordering app');
+    loadElevenLabsWidget();
+    await fetchMenuItems();
   }
 
   // Start the application
