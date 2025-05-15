@@ -1,5 +1,5 @@
 // Use CommonJS require for Netlify compatibility
-const { SquareClient, SquareEnvironment } = require('square');
+const { Client } = require('square');
 
 exports.handler = async function(event) {
   // Enhanced logging for comprehensive debugging
@@ -56,17 +56,21 @@ exports.handler = async function(event) {
   }
 
   try {
-    // Correct Square Client initialization
-    const client = new SquareClient({
-      token: process.env.SQUARE_ACCESS_TOKEN,
-      environment: SquareEnvironment.Production,
+    // Create Square Client with production environment
+    const client = new Client({
+      accessToken: process.env.SQUARE_ACCESS_TOKEN,
+      environment: 'production'
     });
 
-    // Fetch both ITEM and MODIFIER objects
-    const response = await client.catalogApi.listCatalog(undefined, 'ITEM,MODIFIER');
-    const objects = response.result.objects || [];
+    // Use the catalog API to list items
+    const response = await client.catalogApi.searchCatalogItems({
+      enabledLocationIds: process.env.SQUARE_LOCATION_ID ? [process.env.SQUARE_LOCATION_ID] : undefined,
+      productTypes: ['REGULAR']
+    });
 
-    if (!objects.length) {
+    const items = response.result.items || [];
+
+    if (!items.length) {
       return {
         statusCode: 404,
         headers: {
@@ -80,21 +84,16 @@ exports.handler = async function(event) {
       };
     }
 
-    // Transform Catalog Items to required format
-    const transformedItems = objects
-      .filter(obj => obj.type === 'ITEM')
-      .map(item => ({
-        id: item.id,
-        item_data: {
-          name: item.itemData?.name || '',
-          description: item.itemData?.description || '',
-          variations: item.itemData?.variations || [],
-          modifier_list_info: item.itemData?.modifierListInfo || []
-        }
-      }));
-
-    // Optionally, you can also return MODIFIER objects if needed by your agent
-    // const modifiers = objects.filter(obj => obj.type === 'MODIFIER');
+    // Transform items to required format
+    const transformedItems = items.map(item => ({
+      id: item.id,
+      item_data: {
+        name: item.itemData?.name || '',
+        description: item.itemData?.description || '',
+        variations: item.itemData?.variations || [],
+        modifier_list_info: item.itemData?.modifierListInfo || []
+      }
+    }));
 
     return {
       statusCode: 200,
