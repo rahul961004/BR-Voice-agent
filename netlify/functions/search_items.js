@@ -3,7 +3,7 @@ import { Client, Environment } from "square";
 const client = new Client({
   accessToken: process.env.SQUARE_ACCESS_TOKEN,
   environment: Environment.Production,
-  additionalHeaders: { 'Square-Version': '2025-04-16' }
+  additionalHeaders: { 'Square-Version': '2025-03-19' }
 });
 
 export async function handler(event) {
@@ -25,4 +25,3 @@ export async function handler(event) {
     };
   }
 }
-

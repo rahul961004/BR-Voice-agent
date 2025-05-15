@@ -82,10 +82,10 @@ const demoCatalog = [
 // Fetches environment variables from config
 async function fetchMCPEnvironment() {
   try {
-    // Use hardcoded values from config
-    squareAccessToken = "EAAAl5SM50YDIQl1SsC4xJbgqI3t114MBEn02nhI-kzNpBJ7qmHZYCKI0JE_gFNt";
-    locationId = "L165PVGQ2WPNG";
-    console.log('Environment variables loaded from defaults');
+    // Use environment variables
+    squareAccessToken = process.env.SQUARE_ACCESS_TOKEN
+    locationId = process.env.SQUARE_LOCATION_ID
+    console.log('Environment variables loaded');
   } catch (error) {
     console.error('Error fetching environment variables:', error);
   }
@@ -94,11 +94,32 @@ async function fetchMCPEnvironment() {
 // Initializes catalog items
 async function fetchSquareCatalog() {
   try {
-    // Use demo catalog for immediate development
-    catalogItems = demoCatalog;
-    console.log('Demo catalog loaded:', catalogItems.length, 'items');
+    const response = await fetch('/.netlify/functions/list_menu');
+    const data = await response.json();
+    
+    if (data && data.length > 0) {
+      catalogItems = data;
+      console.log('Square catalog loaded:', catalogItems.length, 'items');
+    } else {
+      // Fallback to demo catalog if API fetch fails
+      catalogItems = demoCatalog.map(item => ({
+        id: item.id,
+        name: item.itemData.name,
+        description: item.itemData.description,
+        price: item.itemVariationData?.priceMoney?.amount || 0,
+        currency: item.itemVariationData?.priceMoney?.currency || 'USD'
+      }));
+      console.log('Falling back to demo catalog');
+    }
   } catch (error) {
     console.error('Error fetching catalog:', error);
+    catalogItems = demoCatalog.map(item => ({
+      id: item.id,
+      name: item.itemData.name,
+      description: item.itemData.description,
+      price: item.itemVariationData?.priceMoney?.amount || 0,
+      currency: item.itemVariationData?.priceMoney?.currency || 'USD'
+    }));
   }
 }
 
