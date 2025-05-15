@@ -44,12 +44,9 @@ export async function handler(event) {
     };
   }
 
-  // Validate Access Token and Location ID
-  if (!process.env.SQUARE_ACCESS_TOKEN || !process.env.SQUARE_LOCATION_ID) {
-    console.error('Missing Square Credentials', {
-      accessTokenPresent: !!process.env.SQUARE_ACCESS_TOKEN,
-      locationIdPresent: !!process.env.SQUARE_LOCATION_ID
-    });
+  // Validate Access Token
+  if (!process.env.SQUARE_ACCESS_TOKEN) {
+    console.error('Missing Square Access Token');
     return {
       statusCode: 500,
       headers: {
@@ -66,7 +63,8 @@ export async function handler(event) {
   try {
     // Create Square Client with explicit configuration
     console.log('Initializing Square Client', {
-      baseUrl: Environment.Production
+      baseUrl: Environment.Production,
+      locationIdProvided: !!process.env.SQUARE_LOCATION_ID
     });
 
     const client = new Client({
@@ -75,19 +73,19 @@ export async function handler(event) {
       customUrl: Environment.Production,
       additionalHeaders: { 
         'Square-Version': '2025-03-19',
-        'Square-Location-Id': process.env.SQUARE_LOCATION_ID
+        ...(process.env.SQUARE_LOCATION_ID && { 'Square-Location-Id': process.env.SQUARE_LOCATION_ID })
       }
     });
 
-    // Fetch Catalog Items with Location Context
+    // Fetch Catalog Items 
     console.log('Fetching Catalog Items', {
-      locationId: process.env.SQUARE_LOCATION_ID
+      locationId: process.env.SQUARE_LOCATION_ID || 'Not Specified'
     });
 
+    // Attempt to fetch catalog items with or without location ID
     const response = await client.catalogApi.listCatalog(
       undefined, 
-      ['ITEM'], 
-      process.env.SQUARE_LOCATION_ID
+      ['ITEM']
     );
     
     // Validate Response
