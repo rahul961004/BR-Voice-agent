@@ -1,5 +1,5 @@
 // Use CommonJS require for Netlify compatibility
-const { Client, Environment } = require('square');
+const { SquareClient, SquareEnvironment } = require('square');
 
 exports.handler = async function(event) {
   // Enhanced logging for comprehensive debugging
@@ -56,11 +56,10 @@ exports.handler = async function(event) {
   }
 
   try {
-    // Create Square Client
-    const client = new Client({
-      accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: 'production',
-      squareVersion: '2025-03-19'
+    // Correct Square Client initialization
+    const client = new SquareClient({
+      token: process.env.SQUARE_ACCESS_TOKEN,
+      environment: SquareEnvironment.Production,
     });
 
     // Fetch both ITEM and MODIFIER objects
