@@ -1,6 +1,7 @@
-import { Client, Environment } from "square";
+// Use CommonJS require for Netlify compatibility
+const { Client, Environment } = require('square');
 
-export async function handler(event) {
+exports.handler = async function(event) {
   // Enhanced logging for comprehensive debugging
   console.log('List Menu Function - Detailed Diagnostics', {
     timestamp: new Date().toISOString(),
@@ -56,39 +57,17 @@ export async function handler(event) {
 
   try {
     // Create Square Client
-    console.log('Initializing Square Client', {
-      accessTokenPresent: !!process.env.SQUARE_ACCESS_TOKEN,
-      locationIdProvided: !!process.env.SQUARE_LOCATION_ID
-    });
-
-    // Use the SDK enum if available, else fallback to string
-    let env;
-    try {
-      env = Environment?.Production || 'production';
-    } catch {
-      env = 'production';
-    }
-
     const client = new Client({
       accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: env,
+      environment: Environment.Production,
       squareVersion: '2025-03-19'
     });
 
-    // Search Catalog Items 
-    console.log('Searching Catalog Items', {
-      locationId: process.env.SQUARE_LOCATION_ID || 'Not Specified'
-    });
+    // Fetch both ITEM and MODIFIER objects
+    const response = await client.catalogApi.listCatalog(undefined, 'ITEM,MODIFIER');
+    const objects = response.result.objects || [];
 
-    const response = await client.catalogApi.listCatalog(undefined, ['ITEM', 'MODIFIER']);
-    
-    // Validate Response
-    const objects = response.result.objects;
-    if (!objects || objects.length === 0) {
-      console.warn('No catalog items found', {
-        responseStatus: response.statusCode,
-        responseBody: JSON.stringify(response)
-      });
+    if (!objects.length) {
       return {
         statusCode: 404,
         headers: {
@@ -102,20 +81,22 @@ export async function handler(event) {
       };
     }
 
-    // Transform Catalog Items to include full item_data
-    const transformedItems = objects.map(item => ({
-      id: item.id,
-      item_data: {
-        name: item.itemData?.name || '',
-        description: item.itemData?.description || '',
-        variations: item.itemData?.variations || [],
-        modifier_list_info: item.itemData?.modifierListInfo || []
-      }
-    }));
+    // Transform Catalog Items to required format
+    const transformedItems = objects
+      .filter(obj => obj.type === 'ITEM')
+      .map(item => ({
+        id: item.id,
+        item_data: {
+          name: item.itemData?.name || '',
+          description: item.itemData?.description || '',
+          variations: item.itemData?.variations || [],
+          modifier_list_info: item.itemData?.modifierListInfo || []
+        }
+      }));
 
-    console.log(`Transformed ${transformedItems.length} menu items`);
+    // Optionally, you can also return MODIFIER objects if needed by your agent
+    // const modifiers = objects.filter(obj => obj.type === 'MODIFIER');
 
-    // Return Response
     return {
       statusCode: 200,
       headers: {
