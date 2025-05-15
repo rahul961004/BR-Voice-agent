@@ -1,10 +1,18 @@
-import { Client, Environment } from "square";
+import { Client } from "square";
+
+// Explicitly define environment to avoid import issues
+const Environment = {
+  Production: 'https://connect.squareup.com',
+  Sandbox: 'https://connect.squareupsandbox.com'
+};
 
 export async function handler(event) {
-  // Comprehensive logging for production
-  console.log('List Menu Function - Initiated', {
+  // Enhanced logging for comprehensive debugging
+  console.log('List Menu Function - Detailed Diagnostics', {
+    timestamp: new Date().toISOString(),
     method: event.httpMethod,
-    timestamp: new Date().toISOString()
+    headers: JSON.stringify(event.headers),
+    environment: process.env.NODE_ENV
   });
 
   // CORS Preflight Handling
@@ -29,13 +37,19 @@ export async function handler(event) {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
-      body: JSON.stringify({ error: 'Method Not Allowed' })
+      body: JSON.stringify({ 
+        error: 'Method Not Allowed',
+        details: `Received ${event.httpMethod}, expected GET`
+      })
     };
   }
 
-  // Validate Access Token
-  if (!process.env.SQUARE_ACCESS_TOKEN) {
-    console.error('Missing Square Access Token');
+  // Validate Access Token and Location ID
+  if (!process.env.SQUARE_ACCESS_TOKEN || !process.env.SQUARE_LOCATION_ID) {
+    console.error('Missing Square Credentials', {
+      accessTokenPresent: !!process.env.SQUARE_ACCESS_TOKEN,
+      locationIdPresent: !!process.env.SQUARE_LOCATION_ID
+    });
     return {
       statusCode: 500,
       headers: {
@@ -43,24 +57,58 @@ export async function handler(event) {
         'Access-Control-Allow-Origin': '*'
       },
       body: JSON.stringify({ 
-        error: 'Missing Square Access Token',
-        hint: 'Please check Netlify environment variables'
+        error: 'Missing Square Credentials',
+        hint: 'Check Netlify environment variables'
       })
     };
   }
 
   try {
-    // Create Square Client with Production Environment
+    // Create Square Client with explicit configuration
+    console.log('Initializing Square Client', {
+      baseUrl: Environment.Production
+    });
+
     const client = new Client({
       accessToken: process.env.SQUARE_ACCESS_TOKEN,
       environment: Environment.Production,
-      additionalHeaders: { 'Square-Version': '2025-03-19' }
+      customUrl: Environment.Production,
+      additionalHeaders: { 
+        'Square-Version': '2025-03-19',
+        'Square-Location-Id': process.env.SQUARE_LOCATION_ID
+      }
     });
 
-    // Fetch Catalog Items
-    console.log('Fetching Catalog Items from Square');
-    const response = await client.catalogApi.listCatalog(undefined, ['ITEM']);
+    // Fetch Catalog Items with Location Context
+    console.log('Fetching Catalog Items', {
+      locationId: process.env.SQUARE_LOCATION_ID
+    });
+
+    const response = await client.catalogApi.listCatalog(
+      undefined, 
+      ['ITEM'], 
+      process.env.SQUARE_LOCATION_ID
+    );
     
+    // Validate Response
+    if (!response.result || !response.result.objects) {
+      console.warn('No catalog items found', {
+        responseStatus: response.statusCode,
+        responseBody: JSON.stringify(response)
+      });
+      return {
+        statusCode: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({ 
+          error: 'No menu items found',
+          hint: 'Check Square catalog configuration'
+        })
+      };
+    }
+
     // Transform Catalog Items
     const transformedItems = (response.result.objects || [])
       .filter(item => item.type === 'ITEM')
@@ -92,7 +140,13 @@ export async function handler(event) {
     console.error('Menu Retrieval Error', {
       errorName: error.name,
       errorMessage: error.message,
-      errorCode: error.statusCode || 'UNKNOWN'
+      errorCode: error.statusCode || 'UNKNOWN',
+      errorStack: error.stack,
+      squareClientConfig: {
+        accessTokenPresent: !!process.env.SQUARE_ACCESS_TOKEN,
+        locationIdPresent: !!process.env.SQUARE_LOCATION_ID,
+        environment: Environment.Production
+      }
     });
 
     return {
@@ -103,7 +157,8 @@ export async function handler(event) {
       },
       body: JSON.stringify({ 
         error: 'Failed to retrieve menu',
-        message: error.message
+        message: error.message,
+        details: 'Check server logs for more information'
       })
     };
   }
