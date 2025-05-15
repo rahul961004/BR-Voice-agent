@@ -1,4 +1,4 @@
-import * as square from "square";
+import { SquareClient } from "square";
 
 // Explicitly define environment to avoid import issues
 const Environment = {
@@ -61,30 +61,36 @@ export async function handler(event) {
   }
 
   try {
-    // Create Square Client with explicit configuration
+    // Create Square Client
     console.log('Initializing Square Client', {
       accessTokenPresent: !!process.env.SQUARE_ACCESS_TOKEN,
       locationIdProvided: !!process.env.SQUARE_LOCATION_ID
     });
 
-    const client = new square.Client({
+    const client = new SquareClient({
       accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: square.Environment.Production
+      environment: Environment.Production
     });
 
-    // Fetch Catalog Items 
-    console.log('Fetching Catalog Items', {
+    // Search Catalog Items 
+    console.log('Searching Catalog Items', {
       locationId: process.env.SQUARE_LOCATION_ID || 'Not Specified'
     });
 
-    // Attempt to fetch catalog items
-    const response = await client.catalogApi.listCatalog(
-      undefined, 
-      ['ITEM']
-    );
+    const response = await client.catalogApi.searchCatalogObjects({
+      objectTypes: ['ITEM'],
+      query: {
+        filterClause: {
+          predicates: [{
+            attributeName: 'type',
+            attributeValue: 'ITEM'
+          }]
+        }
+      }
+    });
     
     // Validate Response
-    if (!response.result || !response.result.objects) {
+    if (!response.objects || response.objects.length === 0) {
       console.warn('No catalog items found', {
         responseStatus: response.statusCode,
         responseBody: JSON.stringify(response)
@@ -103,7 +109,7 @@ export async function handler(event) {
     }
 
     // Transform Catalog Items
-    const transformedItems = (response.result.objects || [])
+    const transformedItems = response.objects
       .filter(item => item.type === 'ITEM')
       .map(item => {
         const variation = item.itemData.variations?.[0]?.itemVariationData;
