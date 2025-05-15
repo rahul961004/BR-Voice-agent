@@ -1,4 +1,4 @@
-import { Client } from "square";
+import * as square from "square";
 
 // Explicitly define environment to avoid import issues
 const Environment = {
@@ -63,18 +63,13 @@ export async function handler(event) {
   try {
     // Create Square Client with explicit configuration
     console.log('Initializing Square Client', {
-      baseUrl: Environment.Production,
+      accessTokenPresent: !!process.env.SQUARE_ACCESS_TOKEN,
       locationIdProvided: !!process.env.SQUARE_LOCATION_ID
     });
 
-    const client = new Client({
+    const client = new square.Client({
       accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: Environment.Production,
-      customUrl: Environment.Production,
-      additionalHeaders: { 
-        'Square-Version': '2025-03-19',
-        ...(process.env.SQUARE_LOCATION_ID && { 'Square-Location-Id': process.env.SQUARE_LOCATION_ID })
-      }
+      environment: square.Environment.Production
     });
 
     // Fetch Catalog Items 
@@ -82,7 +77,7 @@ export async function handler(event) {
       locationId: process.env.SQUARE_LOCATION_ID || 'Not Specified'
     });
 
-    // Attempt to fetch catalog items with or without location ID
+    // Attempt to fetch catalog items
     const response = await client.catalogApi.listCatalog(
       undefined, 
       ['ITEM']
@@ -142,8 +137,7 @@ export async function handler(event) {
       errorStack: error.stack,
       squareClientConfig: {
         accessTokenPresent: !!process.env.SQUARE_ACCESS_TOKEN,
-        locationIdPresent: !!process.env.SQUARE_LOCATION_ID,
-        environment: Environment.Production
+        locationIdPresent: !!process.env.SQUARE_LOCATION_ID
       }
     });
 
