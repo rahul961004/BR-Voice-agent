@@ -61,9 +61,17 @@ export async function handler(event) {
       locationIdProvided: !!process.env.SQUARE_LOCATION_ID
     });
 
+    // Use the SDK enum if available, else fallback to string
+    let env;
+    try {
+      env = Environment?.Production || 'production';
+    } catch {
+      env = 'production';
+    }
+
     const client = new Client({
       accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: Environment.Production,
+      environment: env,
       squareVersion: '2025-03-19'
     });
 
