@@ -1,21 +1,14 @@
 // Burger Rebellion Voice Ordering - Main Script
 document.addEventListener('DOMContentLoaded', async function() {
-  // Fetch menu items from Square
-  fetchMenuItems();
-  
   // Application state
   let customerName = '';
   let orderItems = [];
   let conversationHistory = [];
-  let baseApiUrl = '';
-
+  
   // Determine API base URL based on environment
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    baseApiUrl = 'http://localhost:8888';
-  } else {
-    // In production, use relative path which will be handled by Netlify redirects
-    baseApiUrl = '';
-  }
+  const baseApiUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:8888'
+    : ''; // In production, use relative path which will be handled by Netlify redirects
   
   console.log('Using API base URL:', baseApiUrl);
 
@@ -24,6 +17,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   const orderInfo = document.getElementById('order-info');
   const orderSummary = document.getElementById('order-summary');
   const orderItemList = document.getElementById('order-item-list');
+  const menuContainer = document.getElementById('menu-container');
   const widgetPlaceholder = document.getElementById('widget-placeholder');
 
   // Add event listeners
@@ -436,21 +430,26 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   }
 
-  // Fetch menu items from Square API
+  // Fetch menu items from Square API via Netlify function
   async function fetchMenuItems() {
     try {
-      console.log('Fetching menu items from Square...');
+      console.log('Fetching menu items...');
       const response = await fetch('/.netlify/functions/list_menu');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const menuItems = await response.json();
       
-      if (menuItems && menuItems.length > 0) {
+      if (Array.isArray(menuItems) && menuItems.length > 0) {
         console.log('Menu items loaded:', menuItems);
         displayMenuItems(menuItems);
       } else {
-        console.error('Error loading menu items: No items found');
+        console.error('Error: No menu items found');
+        displayMenuItems([]); // Will show "No items available" message
       }
     } catch (error) {
       console.error('Failed to fetch menu:', error);
+      displayMenuItems([]); // Will show "No items available" message
     }
   }
 
@@ -461,12 +460,12 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     menuContainer.innerHTML = '';
     
-    // Create menu header
-    const menuHeader = document.createElement('h3');
-    menuHeader.textContent = 'Menu Items';
-    menuContainer.appendChild(menuHeader);
+    if (menuItems.length === 0) {
+      menuContainer.innerHTML = '<p>No menu items available at the moment.</p>';
+      return;
+    }
     
-    // Create menu item grid
+    // Create menu grid
     const menuGrid = document.createElement('div');
     menuGrid.className = 'menu-grid';
     
@@ -487,7 +486,11 @@ document.addEventListener('DOMContentLoaded', async function() {
       
       const itemPrice = document.createElement('p');
       itemPrice.className = 'menu-item-price';
-      itemPrice.textContent = `$${(item.price/100).toFixed(2)} ${item.currency}`;
+      const formattedPrice = (item.price/100).toLocaleString('en-US', {
+        style: 'currency',
+        currency: item.currency || 'USD'
+      });
+      itemPrice.textContent = formattedPrice;
       menuItemEl.appendChild(itemPrice);
       
       menuGrid.appendChild(menuItemEl);
