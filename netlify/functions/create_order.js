@@ -46,16 +46,16 @@ export async function handler(event) {
     }));
 
     const orderRequest = {
+      idempotencyKey: requestData.idempotency_key || uuidv4(),
       order: {
         locationId: location_id,
         lineItems: lineItems,
-        state: 'OPEN',
+        state: requestData.state || 'DRAFT',   // default to DRAFT
         customerId: requestData.customer_id, // Optional
         metadata: {
           orderSource: 'n8n-voice-ordering'
         }
-      },
-      idempotencyKey: uuidv4()
+      }
     };
 
     const response = await client.ordersApi.createOrder(orderRequest);
